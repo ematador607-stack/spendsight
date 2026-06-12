@@ -295,10 +295,27 @@ const css = `
 
   /* ── RESPONSIVE ── */
   @media (max-width: 768px) {
-    .sidebar { transform: translateX(-100%); }
-    .sidebar.open { transform: translateX(0); }
-    .mobile-header { display: flex !important; }
-    .main { margin-left: 0 !important; padding: 80px 16px 32px !important; }
+    .sidebar {
+      transform: translateX(-100%);
+      z-index: 300;
+      pointer-events: none;
+    }
+    .sidebar.open {
+      transform: translateX(0);
+      pointer-events: all;
+    }
+    .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 250; pointer-events: none; }
+    .mobile-overlay.open { display: block; pointer-events: all; }
+    .mobile-header { display: flex !important; z-index: 200; }
+    .app { display: block !important; }
+    .main {
+      margin-left: 0 !important;
+      padding: 80px 16px 32px !important;
+      width: 100vw !important;
+      position: relative !important;
+      z-index: 1 !important;
+      pointer-events: all !important;
+    }
     .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
     .dashboard-grid { grid-template-columns: 1fr !important; }
     .goals-grid { grid-template-columns: 1fr !important; }
