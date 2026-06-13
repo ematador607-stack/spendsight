@@ -11,7 +11,7 @@ const CURRENCIES = {
   GBP: { symbol: "£",  name: "GBP — Pound",   rate: 0.058 },
 };
 
-// Convert an amount from BWP to the selected currency
+// Convert an amount from BWP to the selected currency. 
 function convertAmount(amountInBWP, currencyCode) {
   const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
   return amountInBWP * c.rate;
