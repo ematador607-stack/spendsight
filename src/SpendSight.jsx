@@ -1,27 +1,35 @@
 import { useState, useEffect, useRef } from "react";
 
 // ─── CURRENCY CONFIG ──────────────────────────────────────────────────────────
-// Exchange rates relative to BWP (Botswana Pula)
-// These are approximate static rates — in production you'd fetch live rates
-const CURRENCIES = {
-  BWP: { symbol: "P",  name: "BWP — Pula",    rate: 1 },
-  ZAR: { symbol: "R",  name: "ZAR — Rand",    rate: 1.26 },
-  USD: { symbol: "$",  name: "USD — Dollar",  rate: 0.074 },
-  EUR: { symbol: "€",  name: "EUR — Euro",    rate: 0.068 },
-  GBP: { symbol: "£",  name: "GBP — Pound",   rate: 0.058 },
+// Exchange rates relative to BWP (Botswana Pula) — used ONLY for conversions when switching currencies
+// All stored amounts are in the user's selected currency
+const EXCHANGE_RATES = {
+  BWP: 1,
+  ZAR: 1.26,
+  USD: 0.074,
+  EUR: 0.068,
+  GBP: 0.058,
 };
 
-// Convert an amount from BWP to the selected currency. 
-function convertAmount(amountInBWP, currencyCode) {
-  const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
-  return amountInBWP * c.rate;
+const CURRENCIES = {
+  BWP: { symbol: "P",  name: "BWP — Pula",    code: "BWP" },
+  ZAR: { symbol: "R",  name: "ZAR — Rand",    code: "ZAR" },
+  USD: { symbol: "$",  name: "USD — Dollar",  code: "USD" },
+  EUR: { symbol: "€",  name: "EUR — Euro",    code: "EUR" },
+  GBP: { symbol: "£",  name: "GBP — Pound",   code: "GBP" },
+};
+
+// Convert an amount from one currency to another using BWP as bridge
+function convertCurrency(amount, fromCurrency, toCurrency) {
+  if (fromCurrency === toCurrency) return amount;
+  const amountInBWP = amount / EXCHANGE_RATES[fromCurrency];
+  return amountInBWP * EXCHANGE_RATES[toCurrency];
 }
 
-// Format a BWP amount into the selected currency display
-function formatMoney(amountInBWP, currencyCode) {
+// Format an amount in the given currency
+function formatMoney(amount, currencyCode) {
   const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
-  const converted = amountInBWP * c.rate;
-  return `${c.symbol} ${converted.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${c.symbol} ${amount.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
@@ -74,18 +82,7 @@ function useLocalStorage(key, initial) {
   return [val, setVal];
 }
 
-// BATCH 1: Helper to get gross income from incomes array or fallback to user.income
-function getGrossIncome(incomes, userIncome) {
-  if (incomes && incomes.length > 0) {
-    return incomes.reduce((sum, inc) => sum + inc.amount, 0);
-  }
-  return userIncome || 0;
-}
-
-// ─── STYLES ───────────────────────────────────────────────────────────────────
-// The app manages its own light/dark theme via a class on <html>
-// .dark class = dark mode, default = light mode
-// This avoids relying on system CSS variables which caused invisible text bugs
+// ─── STYLES (append new CSS at the end before closing backtick) ──────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
@@ -202,22 +199,52 @@ const css = `
   .greeting-name { color: var(--greeting-name); }
   .greeting-tagline { color: var(--muted); font-size: 15px; margin-top: 4px; }
 
-  /* BATCH 1: Enhanced income banner styles */
-  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px; margin-bottom: 24px; }
-  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 12px; }
-  .income-total { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: var(--stat-value); }
-  .income-total-label { font-size: 13px; color: var(--muted); margin-right: 8px; }
-  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; }
-  .income-sources { margin-top: 12px; }
-  .income-source-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .income-source-row:last-child { border-bottom: none; }
-  .income-source-type { display: flex; align-items: center; gap: 8px; }
-  .income-badge { background: #00C89615; color: var(--mint); padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .income-source-label { color: var(--text); }
-  .income-source-amount { font-weight: 600; color: var(--stat-value); }
-  .income-credited-section { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
-  .income-toggle { cursor: pointer; color: var(--mint); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px; }
-  .income-credited-list { margin-left: 16px; }
+  /* ── CURRENCY BANNER (new) ── */
+  .currency-banner {
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 14px;
+    padding: 16px 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .currency-banner-label {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .currency-banner-value {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: var(--mint);
+  }
+  .currency-selector {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* ── INCOME BANNER (updated) ── */
+  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
+  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+  .income-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); }
+  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .income-total { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; color: var(--mint); margin-bottom: 12px; }
+  .income-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .income-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .income-type-badge { background: var(--mint)20; color: var(--mint); padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .income-amount { font-weight: 600; color: var(--mint); }
+  .income-delete { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 14px; padding: 0 4px; }
+  .credited-section { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .credited-toggle { background: none; border: none; color: var(--mint); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
 
   /* ── STAT CARDS ── */
   .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
@@ -228,7 +255,7 @@ const css = `
   .stat-card.free::after { background: var(--mint); }
   .stat-card.savings::after { background: #F6C90E; }
   .stat-label { font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
-  /* stat-value uses its own variable so it's always visible in both modes */
+  .stat-label small { font-size: 10px; text-transform: none; font-weight: normal; color: var(--muted); }
   .stat-value { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 700; color: var(--stat-value); }
   .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
@@ -283,8 +310,8 @@ const css = `
   .format-pill { padding: 4px 12px; background: #00C89615; color: var(--mint); border-radius: 20px; font-size: 12px; font-weight: 600; }
 
   /* ── GOALS ── */
-  .goals-grid { display: flex; flex-wrap: wrap; gap: 16px; }
-  .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); flex: 1; min-width: 260px; }
+  .goals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
   .goal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
   .goal-name { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--text); }
   .goal-emoji { font-size: 24px; }
@@ -294,7 +321,7 @@ const css = `
   .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
   .progress-fill { height: 100%; background: var(--mint); border-radius: 3px; transition: width 0.6s ease; }
   .goal-meta { font-size: 12px; color: var(--muted); }
-  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; flex: 1; min-width: 260px; }
+  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; width: 100%; }
   .add-goal-card:hover { border-color: var(--mint); background: #00C89608; }
   .add-goal-icon { font-size: 28px; color: var(--muted); }
   .add-goal-text { font-size: 14px; color: var(--muted); font-weight: 500; }
@@ -372,12 +399,13 @@ const css = `
     .main { margin-left: 0 !important; padding: 80px 16px 32px !important; width: 100vw !important; position: relative !important; z-index: 1 !important; pointer-events: all !important; }
     .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
     .dashboard-grid { grid-template-columns: 1fr !important; }
-    .goals-grid { flex-direction: column !important; }
+    .goals-grid { grid-template-columns: 1fr !important; }
     .auth-card { padding: 32px 24px; }
     .donut-wrap { flex-direction: column; }
     .greeting { font-size: 22px !important; }
     .stat-value { font-size: 22px !important; }
     .income-banner { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .income-input { width: 100% !important; }
     .settings-row { flex-wrap: wrap; }
     .tx-item { gap: 8px; }
     .cat-badge { display: none; }
@@ -419,7 +447,7 @@ function DonutChart({ data, currency }) {
           style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 11 }}>Total</text>
         <text x={cx} y={cy + 8} textAnchor="middle" fill="#00C896"
           style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 10 }}>
-          {c.symbol}{(total * c.rate).toLocaleString("en-BW", { maximumFractionDigits: 0 })}
+          {c.symbol}{(total * EXCHANGE_RATES[currency] / EXCHANGE_RATES[currency]).toLocaleString("en-BW", { maximumFractionDigits: 0 })}
         </text>
       </svg>
       <div className="donut-legend">
@@ -460,75 +488,25 @@ function BarChart({ data }) {
   );
 }
 
-// BATCH 1: Add Income Modal component
-function AddIncomeModal({ onClose, onSave, currency }) {
-  const [form, setForm] = useState({
-    sourceType: "Salary",
-    amount: "",
-    label: "",
-    date: new Date().toISOString().split("T")[0]
-  });
-
-  const incomeTypes = ["Salary", "Business", "Allowance", "Gift", "Side Hustle", "Other"];
-
-  const handleSave = () => {
-    const amount = parseFloat(form.amount);
-    if (isNaN(amount) || amount <= 0) return;
-    onSave({
-      id: Date.now(),
-      sourceType: form.sourceType,
-      amount: amount,
-      label: form.label.trim() || undefined,
-      date: form.date
-    });
-    onClose();
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">➕ Add Income</div>
-        
-        <label className="modal-label">Source Type</label>
-        <select className="modal-input" value={form.sourceType} onChange={e => setForm(f => ({ ...f, sourceType: e.target.value }))}>
-          {incomeTypes.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-
-        <label className="modal-label">Amount ({currency})</label>
-        <input className="modal-input" type="number" placeholder="e.g. 5000" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
-
-        <label className="modal-label">Label (optional)</label>
-        <input className="modal-input" placeholder="e.g. Freelance logo work" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
-
-        <label className="modal-label">Date</label>
-        <input className="modal-input" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-
-        <div className="modal-actions">
-          <button className="btn-cancel" onClick={onClose}>Cancel</button>
-          <button className="btn-save" onClick={handleSave}>Add Income</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── PAGES ───────────────────────────────────────────────────────────────────
-// BATCH 1: Updated Dashboard with multi-source income
-function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }) {
-  const tagline = taglines[new Date().getDay() % taglines.length];
-  const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
-  const grossIncome = getGrossIncome(incomes, user.income);
-  const freeCash = Math.max(0, grossIncome - totalSpent);
-  const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
+function Dashboard({ user, transactions, goals, incomes, onAddIncome, onDeleteIncome, currency, onCurrencyChange, showToast }) {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
-  const [showCreditedIncome, setShowCreditedIncome] = useState(false);
-
-  // BATCH 1: Get credited transactions (credit type with incomeType)
+  const [showCreditedBreakdown, setShowCreditedBreakdown] = useState(false);
+  const [incomeForm, setIncomeForm] = useState({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
+  const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
+  
+  const tagline = taglines[new Date().getDay() % taglines.length];
+  
+  // Calculate gross income from incomes array
+  const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
+  const freeCash = Math.max(0, grossIncome - totalSpent);
+  const totalSaved = 0; // goals sum will come from props later
+  
+  // Credited transactions with incomeType (for Feature 9)
   const creditedTransactions = transactions.filter(t => t.type === "credit" && t.incomeType);
   
-  // BATCH 1: Sort incomes by date (newest first)
-  const sortedIncomes = [...(incomes || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-
+  // Group transactions by category for chart
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
     catMap[t.category] = (catMap[t.category] || 0) + t.amount;
@@ -537,70 +515,122 @@ function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }
     const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[7];
     return { name, value, color: cat.color };
   }).sort((a, b) => b.value - a.value);
-
+  
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const barData = months.map((label, mi) => ({
     label,
     value: transactions.filter(t => t.type === "debit" && new Date(t.date).getMonth() === mi).reduce((s, t) => s + t.amount, 0)
   }));
-
+  
   const recent = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
-
+  
+  const handleCurrencyChange = (newCurrency) => {
+    if (!currencyConfirmShown) {
+      showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`);
+      setCurrencyConfirmShown(true);
+    }
+    onCurrencyChange(newCurrency);
+  };
+  
+  const handleAddIncome = () => {
+    if (!incomeForm.amount || incomeForm.amount <= 0) {
+      showToast("Please enter a valid amount");
+      return;
+    }
+    onAddIncome({
+      id: Date.now(),
+      source: incomeForm.source,
+      amount: parseFloat(incomeForm.amount),
+      label: incomeForm.label || "",
+      date: incomeForm.date
+    });
+    setIncomeForm({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
+    setShowIncomeModal(false);
+    showToast(`💰 Added ${formatMoney(parseFloat(incomeForm.amount), currency)} from ${incomeForm.source}`);
+  };
+  
+  const incomeSources = ["Salary", "Business", "Allowance", "Gift", "Side Hustle", "Other"];
+  
   return (
     <div>
+      {/* Currency selector - prominent at top */}
+      <div className="currency-banner">
+        <div>
+          <div className="currency-banner-label">Your preferred currency</div>
+          <div className="currency-banner-value">
+            {CURRENCIES[currency]?.name || "BWP — Pula"}
+          </div>
+        </div>
+        <select 
+          className="currency-selector"
+          value={currency}
+          onChange={(e) => handleCurrencyChange(e.target.value)}
+        >
+          {Object.entries(CURRENCIES).map(([code, c]) => (
+            <option key={code} value={code}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+      
       <div className="page-header">
         <div className="greeting">
           {getGreeting()}, <span className="greeting-name">{user.name} 👋</span>
         </div>
         <div className="greeting-tagline">{tagline}</div>
       </div>
-
-      {/* BATCH 1: Enhanced income banner */}
+      
+      {/* Income Banner - Feature 9 */}
       <div className="income-banner">
         <div className="income-header">
-          <div>
-            <span className="income-total-label">💰 Gross Income</span>
-            <span className="income-total">{formatMoney(grossIncome, currency)}</span>
-          </div>
-          <button className="btn-add-income" onClick={() => setShowIncomeModal(true)}>＋ Add Income</button>
+          <div className="income-title">💰 Income Sources</div>
+          <button className="btn-add-income" onClick={() => setShowIncomeModal(true)}>+ Add Income</button>
+        </div>
+        <div className="income-total">{formatMoney(grossIncome, currency)}</div>
+        <div className="income-list">
+          {incomes.length === 0 && (
+            <div className="empty-text" style={{ textAlign: "center", padding: "12px" }}>
+              No income sources added yet. Click + Add Income.
+            </div>
+          )}
+          {incomes.map(inc => (
+            <div key={inc.id} className="income-row">
+              <div>
+                <span className="income-type-badge">{inc.source}</span>
+                {inc.label && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>— {inc.label}</span>}
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{inc.date}</div>
+              </div>
+              <div>
+                <span className="income-amount">{formatMoney(inc.amount, currency)}</span>
+                <button className="income-delete" onClick={() => onDeleteIncome(inc.id)}>✕</button>
+              </div>
+            </div>
+          ))}
         </div>
         
-        {(sortedIncomes.length > 0 || creditedTransactions.length > 0) && (
-          <div className="income-sources">
-            {sortedIncomes.map(inc => (
-              <div key={inc.id} className="income-source-row">
-                <div className="income-source-type">
-                  <span className="income-badge">{inc.sourceType}</span>
-                  {inc.label && <span className="income-source-label">{inc.label}</span>}
-                </div>
-                <div className="income-source-amount">{formatMoney(inc.amount, currency)}</div>
-              </div>
-            ))}
-            
-            {creditedTransactions.length > 0 && (
-              <div className="income-credited-section">
-                <div className="income-toggle" onClick={() => setShowCreditedIncome(!showCreditedIncome)}>
-                  {showCreditedIncome ? "▼" : "▶"} Credited Income ({creditedTransactions.length})
-                </div>
-                {showCreditedIncome && (
-                  <div className="income-credited-list">
-                    {creditedTransactions.map(tx => (
-                      <div key={tx.id} className="income-source-row">
-                        <div className="income-source-type">
-                          <span className="income-badge">{tx.incomeType}</span>
-                          <span className="income-source-label">{tx.description}</span>
-                        </div>
-                        <div className="income-source-amount">{formatMoney(tx.amount, currency)}</div>
-                      </div>
-                    ))}
+        {/* Credited transactions section */}
+        {creditedTransactions.length > 0 && (
+          <div className="credited-section">
+            <button className="credited-toggle" onClick={() => setShowCreditedBreakdown(!showCreditedBreakdown)}>
+              {showCreditedBreakdown ? "▼" : "▶"} Credited Income ({creditedTransactions.length})
+            </button>
+            {showCreditedBreakdown && (
+              <div className="income-list" style={{ marginTop: 8 }}>
+                {creditedTransactions.map(tx => (
+                  <div key={tx.id} className="income-row">
+                    <div>
+                      <span className="income-type-badge">{tx.incomeType || "Other"}</span>
+                      <span style={{ marginLeft: 8, fontSize: 13 }}>{tx.description}</span>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{tx.date}</div>
+                    </div>
+                    <div className="income-amount">+{formatMoney(tx.amount, currency)}</div>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </div>
         )}
       </div>
-
+      
       <div className="stats-grid">
         <div className="stat-card spent">
           <div className="stat-label">Total Spent</div>
@@ -608,17 +638,20 @@ function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }
           <div className="stat-sub">This month</div>
         </div>
         <div className="stat-card free">
-          <div className="stat-label">Free Cash</div>
+          <div className="stat-label">
+            Free Cash 
+            <small style={{ display: "block", fontSize: 10, marginTop: 2 }}>(money left after expenses)</small>
+          </div>
           <div className="stat-value">{formatMoney(freeCash, currency)}</div>
-          <div className="stat-sub">After essentials</div>
+          <div className="stat-sub">Income minus spending</div>
         </div>
         <div className="stat-card savings">
           <div className="stat-label">Savings Progress</div>
           <div className="stat-value">{formatMoney(totalSaved, currency)}</div>
-          <div className="stat-sub">Across {goals.length} goal{goals.length !== 1 ? "s" : ""}</div>
+          <div className="stat-sub">Across goals</div>
         </div>
       </div>
-
+      
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-title">Spending by Category</div>
@@ -629,7 +662,7 @@ function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }
           <BarChart data={barData} />
         </div>
       </div>
-
+      
       <div className="card">
         <div className="card-title">Recent Transactions</div>
         {recent.length === 0 ? (
@@ -659,13 +692,36 @@ function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }
           </div>
         )}
       </div>
-
+      
+      {/* Add Income Modal */}
       {showIncomeModal && (
-        <AddIncomeModal
-          onClose={() => setShowIncomeModal(false)}
-          onSave={onAddIncome}
-          currency={currency}
-        />
+        <div className="modal-overlay" onClick={() => setShowIncomeModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Add Income</div>
+            <label className="modal-label">Source Type</label>
+            <select 
+              className="modal-input" 
+              value={incomeForm.source} 
+              onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))}
+              style={{ appearance: "auto" }}
+            >
+              {incomeSources.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label>
+            <input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01"
+              value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} />
+            <label className="modal-label">Label (optional)</label>
+            <input className="modal-input" placeholder="e.g. Freelance project"
+              value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} />
+            <label className="modal-label">Date</label>
+            <input className="modal-input" type="date"
+              value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} />
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button>
+              <button className="btn-save" onClick={handleAddIncome}>Add Income</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -750,7 +806,6 @@ function UploadPage({ onUpload }) {
   );
 }
 
-// BATCH 1: Updated TransactionsPage signature (added setTransactions prop for future features)
 function TransactionsPage({ transactions, setTransactions, currency }) {
   const [search, setSearch] = useState("");
   const filtered = transactions.filter(t =>
@@ -891,7 +946,7 @@ function GoalsPage({ goals, onAdd, currency }) {
       </div>
       <div className="goals-grid">
         {goals.length === 0 && (
-          <div style={{ gridColumn: "1/-1", width: "100%" }}>
+          <div style={{ gridColumn: "1/-1" }}>
             <div className="empty-state" style={{ padding: "60px 20px" }}>
               <div className="empty-icon">🎯</div>
               <div className="empty-text">No goals yet. Add one.</div>
@@ -945,8 +1000,8 @@ function GoalsPage({ goals, onAdd, currency }) {
             <label className="modal-label">Goal Name</label>
             <input className="modal-input" placeholder="e.g. Trip to Cape Town"
               value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-            <label className="modal-label">Target Amount (BWP)</label>
-            <input className="modal-input" type="number" placeholder="5000"
+            <label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label>
+            <input className="modal-input" type="number" placeholder="5000" step="0.01"
               value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} />
             <label className="modal-label">Deadline (optional)</label>
             <input className="modal-input" type="date"
@@ -962,7 +1017,17 @@ function GoalsPage({ goals, onAdd, currency }) {
   );
 }
 
-function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange }) {
+function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange, showToast }) {
+  const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
+  
+  const handleCurrencyChange = (newCurrency) => {
+    if (!currencyConfirmShown) {
+      showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`);
+      setCurrencyConfirmShown(true);
+    }
+    onCurrencyChange(newCurrency);
+  };
+  
   return (
     <div>
       <div className="page-header">
@@ -985,6 +1050,21 @@ function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange,
       <div className="settings-section">
         <div className="settings-title">Preferences</div>
         <div className="settings-card">
+          {/* Currency selector (also here for convenience) */}
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-label">Currency</div>
+              <div className="settings-row-sub">All amounts stored and displayed in your chosen currency</div>
+            </div>
+            <select
+              className="settings-select"
+              value={currency}
+              onChange={e => handleCurrencyChange(e.target.value)}>
+              {Object.entries(CURRENCIES).map(([code, c]) => (
+                <option key={code} value={code}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
           {/* DARK/LIGHT MODE TOGGLE */}
           <div className="settings-row">
@@ -1010,23 +1090,6 @@ function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange,
               </button>
             </div>
           </div>
-
-          {/* CURRENCY SELECTOR — changes all money displays app-wide */}
-          <div className="settings-row">
-            <div>
-              <div className="settings-row-label">Currency</div>
-              <div className="settings-row-sub">All amounts convert from BWP at current rates</div>
-            </div>
-            <select
-              className="settings-select"
-              value={currency}
-              onChange={e => onCurrencyChange(e.target.value)}>
-              {Object.entries(CURRENCIES).map(([code, c]) => (
-                <option key={code} value={code}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
         </div>
       </div>
 
@@ -1062,10 +1125,8 @@ export default function SpendSight() {
   const [transactions, setTransactions] = useLocalStorage("ss_transactions", []);
   const [importedFiles, setImportedFiles] = useLocalStorage("ss_imported_files", []);
   const [goals, setGoals] = useLocalStorage("ss_goals", []);
-  // BATCH 1: New incomes array
   const [incomes, setIncomes] = useLocalStorage("ss_incomes", []);
-  const [currency, setCurrency] = useLocalStorage("ss_currency", "BWP");
-  // theme: "light" | "dark" | "system"
+  const [currency, setCurrency] = useLocalStorage("ss_currency", null); // Start as null — must select first
   const [theme, setTheme] = useLocalStorage("ss_theme", "system");
   const [page, setPage] = useState("dashboard");
   const [authTab, setAuthTab] = useState("login");
@@ -1081,14 +1142,12 @@ export default function SpendSight() {
     } else if (theme === "light") {
       html.classList.remove("dark");
     } else {
-      // "system" — follow OS preference
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       if (prefersDark) html.classList.add("dark");
       else html.classList.remove("dark");
     }
   }, [theme]);
 
-  // Also listen for OS preference changes when in "system" mode
   useEffect(() => {
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1108,6 +1167,11 @@ export default function SpendSight() {
     const name = authTab === "signup" ? form.name : (form.name || form.email.split("@")[0]);
     setUser({ name, email: form.email, income: 0 });
     showToast(`Welcome${authTab === "signup" ? "" : " back"}, ${name}!`);
+    
+    // If no currency is selected, prompt user on dashboard
+    if (!currency) {
+      showToast("💰 Please select your preferred currency from the banner above.");
+    }
   };
 
   const handleUpload = (newTx, fileKey) => {
@@ -1120,11 +1184,42 @@ export default function SpendSight() {
     setPage("transactions");
     showToast(`${newTx.length} transactions imported!`);
   };
-
-  // BATCH 1: Add income handler
+  
   const handleAddIncome = (income) => {
-    setIncomes(prev => [...prev, income]);
-    showToast(`Added ${income.sourceType}: ${formatMoney(income.amount, currency)}`);
+    setIncomes(i => [...i, income]);
+  };
+  
+  const handleDeleteIncome = (id) => {
+    setIncomes(i => i.filter(inc => inc.id !== id));
+    showToast("Income entry removed.");
+  };
+  
+  const handleCurrencyChange = (newCurrency) => {
+    // If changing from one currency to another, convert all stored amounts
+    if (currency && currency !== newCurrency) {
+      // Convert transactions
+      const convertedTransactions = transactions.map(tx => ({
+        ...tx,
+        amount: convertCurrency(tx.amount, currency, newCurrency)
+      }));
+      setTransactions(convertedTransactions);
+      
+      // Convert incomes
+      const convertedIncomes = incomes.map(inc => ({
+        ...inc,
+        amount: convertCurrency(inc.amount, currency, newCurrency)
+      }));
+      setIncomes(convertedIncomes);
+      
+      // Convert goals
+      const convertedGoals = goals.map(g => ({
+        ...g,
+        target: convertCurrency(g.target, currency, newCurrency),
+        saved: convertCurrency(g.saved, currency, newCurrency)
+      }));
+      setGoals(convertedGoals);
+    }
+    setCurrency(newCurrency);
   };
 
   const navItems = [
@@ -1173,6 +1268,40 @@ export default function SpendSight() {
       </>
     );
   }
+  
+  // If no currency selected, show only currency selector (lock the app)
+  if (!currency) {
+    return (
+      <>
+        <style>{css}</style>
+        <div className="app">
+          <main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}>
+            <div className="card" style={{ maxWidth: 500, textAlign: "center" }}>
+              <div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div>
+              <p style={{ marginBottom: 24, color: "var(--muted)" }}>
+                Please select your preferred currency first. All your transactions and goals will be stored in this currency.
+              </p>
+              <select 
+                className="currency-selector" 
+                style={{ padding: 12, fontSize: 16, width: "100%" }}
+                onChange={(e) => {
+                  setCurrency(e.target.value);
+                  showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`);
+                }}
+                defaultValue=""
+              >
+                <option value="" disabled>Select your currency...</option>
+                {Object.entries(CURRENCIES).map(([code, c]) => (
+                  <option key={code} value={code}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          </main>
+        </div>
+        {toast && <div className="toast">{toast}</div>}
+      </>
+    );
+  }
 
   return (
     <>
@@ -1212,10 +1341,18 @@ export default function SpendSight() {
         </div>
 
         <main className="main">
-          {/* BATCH 1: Pass incomes and onAddIncome to Dashboard */}
-          {page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} onAddIncome={handleAddIncome} currency={currency} />}
+          {page === "dashboard" && <Dashboard 
+            user={user} 
+            transactions={transactions} 
+            goals={goals}
+            incomes={incomes}
+            onAddIncome={handleAddIncome}
+            onDeleteIncome={handleDeleteIncome}
+            currency={currency}
+            onCurrencyChange={handleCurrencyChange}
+            showToast={showToast}
+          />}
           {page === "upload" && <UploadPage onUpload={handleUpload} />}
-          {/* BATCH 1: Pass setTransactions to TransactionsPage */}
           {page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} />}
           {page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}
           {page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} currency={currency} />}
@@ -1225,9 +1362,10 @@ export default function SpendSight() {
               onLogout={() => { setUser(null); setPage("dashboard"); }}
               onClearData={() => { setTransactions([]); setGoals([]); setImportedFiles([]); setIncomes([]); showToast("All data cleared."); }}
               currency={currency}
-              onCurrencyChange={setCurrency}
+              onCurrencyChange={handleCurrencyChange}
               theme={theme}
               onThemeChange={setTheme}
+              showToast={showToast}
             />
           )}
         </main>
