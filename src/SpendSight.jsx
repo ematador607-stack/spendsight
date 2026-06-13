@@ -1,5 +1,29 @@
 import { useState, useEffect, useRef } from "react";
 
+// ─── CURRENCY CONFIG ──────────────────────────────────────────────────────────
+// Exchange rates relative to BWP (Botswana Pula)
+// These are approximate static rates — in production you'd fetch live rates
+const CURRENCIES = {
+  BWP: { symbol: "P",  name: "BWP — Pula",    rate: 1 },
+  ZAR: { symbol: "R",  name: "ZAR — Rand",    rate: 1.26 },
+  USD: { symbol: "$",  name: "USD — Dollar",  rate: 0.074 },
+  EUR: { symbol: "€",  name: "EUR — Euro",    rate: 0.068 },
+  GBP: { symbol: "£",  name: "GBP — Pound",   rate: 0.058 },
+};
+
+// Convert an amount from BWP to the selected currency. 
+function convertAmount(amountInBWP, currencyCode) {
+  const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
+  return amountInBWP * c.rate;
+}
+
+// Format a BWP amount into the selected currency display
+function formatMoney(amountInBWP, currencyCode) {
+  const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
+  const converted = amountInBWP * c.rate;
+  return `${c.symbol} ${converted.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 // ─── THEME ───────────────────────────────────────────────────────────────────
 const COLORS = {
   navy: "#1A1A2E",
@@ -23,14 +47,14 @@ const taglines = [
 ];
 
 const CATEGORIES = [
-  { name: "Groceries", icon: "🛒", color: "#00C896" },
-  { name: "Transport", icon: "🚗", color: "#4299E1" },
-  { name: "Entertainment", icon: "🎬", color: "#9F7AEA" },
-  { name: "Bills", icon: "📄", color: "#ED8936" },
-  { name: "Health", icon: "💊", color: "#FC8181" },
-  { name: "Shopping", icon: "🛍️", color: "#F6C90E" },
-  { name: "Food & Dining", icon: "🍽️", color: "#68D391" },
-  { name: "Other", icon: "📦", color: "#CBD5E0" },
+  { name: "Groceries",    icon: "🛒", color: "#00C896" },
+  { name: "Transport",    icon: "🚗", color: "#4299E1" },
+  { name: "Entertainment",icon: "🎬", color: "#9F7AEA" },
+  { name: "Bills",        icon: "📄", color: "#ED8936" },
+  { name: "Health",       icon: "💊", color: "#FC8181" },
+  { name: "Shopping",     icon: "🛍️", color: "#F6C90E" },
+  { name: "Food & Dining",icon: "🍽️", color: "#68D391" },
+  { name: "Other",        icon: "📦", color: "#CBD5E0" },
 ];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -39,10 +63,6 @@ function getGreeting() {
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
-}
-
-function formatPula(n) {
-  return `P ${Number(n).toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function useLocalStorage(key, initial) {
@@ -54,12 +74,24 @@ function useLocalStorage(key, initial) {
   return [val, setVal];
 }
 
+// BATCH 1: Helper to get gross income from incomes array or fallback to user.income
+function getGrossIncome(incomes, userIncome) {
+  if (incomes && incomes.length > 0) {
+    return incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  }
+  return userIncome || 0;
+}
+
 // ─── STYLES ───────────────────────────────────────────────────────────────────
+// The app manages its own light/dark theme via a class on <html>
+// .dark class = dark mode, default = light mode
+// This avoids relying on system CSS variables which caused invisible text bugs
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* ── LIGHT MODE (default) ── */
   :root {
     --navy: #1A1A2E;
     --navy-deep: #0F0F1A;
@@ -70,11 +102,32 @@ const css = `
     --text: #2D3748;
     --muted: #718096;
     --border: #E2E8F0;
+    --stat-value: #1A1A2E;
+    --greeting-name: #1A1A2E;
+    --card-bg: #FFFFFF;
   }
 
-  /* Force light mode — app has its own design system, ignore system preference */
-  html { color-scheme: light; }
-  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; -webkit-text-size-adjust: 100%; }
+  /* ── DARK MODE — toggled by adding class="dark" to <html> ── */
+  html.dark {
+    --bg: #0F0F1A;
+    --surface: #1A1A2E;
+    --text: #E2E8F0;
+    --muted: #A0AEC0;
+    --border: #2D3748;
+    --stat-value: #E2E8F0;
+    --greeting-name: #00C896;
+    --card-bg: #1A1A2E;
+  }
+
+  html { color-scheme: light dark; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-text-size-adjust: 100%;
+    transition: background 0.25s, color 0.25s;
+  }
 
   input, select, button, textarea { -webkit-appearance: none; font-family: 'DM Sans', sans-serif; }
 
@@ -102,7 +155,7 @@ const css = `
   .nav-item .nav-icon { font-size: 18px; width: 24px; text-align: center; }
   .sidebar-footer { padding: 24px; border-top: 1px solid #ffffff10; }
   .user-chip { display: flex; align-items: center; gap: 10px; background: #ffffff08; border-radius: 10px; padding: 10px 12px; }
-  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--navy-deep); }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 13px; color: var(--navy-deep); flex-shrink: 0; }
   .user-name { color: white; font-size: 13px; font-weight: 500; }
 
   /* ── MOBILE HEADER ── */
@@ -110,11 +163,10 @@ const css = `
     display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 200;
     background: var(--navy-deep); padding: 16px 20px;
     align-items: center; justify-content: space-between;
-    border-bottom: 1px solid #ffffff10;
-    height: 60px;
+    border-bottom: 1px solid #ffffff10; height: 60px;
   }
   .hamburger { background: none; border: none; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 4px; }
-  .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; transition: all 0.3s; }
+  .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; }
   .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 150; pointer-events: none; }
   .mobile-overlay.open { display: block; pointer-events: all; }
 
@@ -140,46 +192,50 @@ const css = `
   .form-input { width: 100%; padding: 14px 16px; background: #ffffff08; border: 1px solid #ffffff15; border-radius: 10px; color: white; font-family: 'DM Sans', sans-serif; font-size: 14px; outline: none; transition: all 0.2s; }
   .form-input:focus { border-color: var(--mint); background: #ffffff10; }
   .form-input::placeholder { color: #ffffff30; }
-  .btn-primary { width: 100%; padding: 15px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: all 0.2s; letter-spacing: 0.3px; }
-  .btn-primary:hover { background: #00e0aa; transform: translateY(-1px); box-shadow: 0 8px 24px #00C89640; }
+  .btn-primary { width: 100%; padding: 15px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: all 0.2s; }
+  .btn-primary:hover { background: #00e0aa; transform: translateY(-1px); }
   .btn-primary:active { transform: translateY(0); }
 
   /* ── PAGE LAYOUT ── */
   .page-header { margin-bottom: 32px; }
   .greeting { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 700; color: var(--text); }
-  .greeting-name { color: var(--navy); }
+  .greeting-name { color: var(--greeting-name); }
   .greeting-tagline { color: var(--muted); font-size: 15px; margin-top: 4px; }
 
-  /* ── INCOME INPUT ON DASHBOARD ── */
-  .income-banner {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-    padding: 16px 20px; display: flex; align-items: center; gap: 16px;
-    margin-bottom: 24px; flex-wrap: wrap;
-  }
-  .income-label { font-size: 14px; color: var(--muted); flex: 1; min-width: 160px; }
-  .income-input {
-    padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
-    font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--text);
-    background: var(--bg); outline: none; width: 160px; transition: border-color 0.2s;
-  }
-  .income-input:focus { border-color: var(--mint); }
+  /* BATCH 1: Enhanced income banner styles */
+  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 20px; margin-bottom: 24px; }
+  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 12px; }
+  .income-total { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: var(--stat-value); }
+  .income-total-label { font-size: 13px; color: var(--muted); margin-right: 8px; }
+  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .income-sources { margin-top: 12px; }
+  .income-source-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .income-source-row:last-child { border-bottom: none; }
+  .income-source-type { display: flex; align-items: center; gap: 8px; }
+  .income-badge { background: #00C89615; color: var(--mint); padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .income-source-label { color: var(--text); }
+  .income-source-amount { font-weight: 600; color: var(--stat-value); }
+  .income-credited-section { margin-top: 12px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .income-toggle { cursor: pointer; color: var(--mint); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+  .income-credited-list { margin-left: 16px; }
 
   /* ── STAT CARDS ── */
   .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
-  .stat-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); position: relative; overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
-  .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px #00000010; }
+  .stat-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); position: relative; overflow: hidden; transition: transform 0.2s; }
+  .stat-card:hover { transform: translateY(-2px); }
   .stat-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
   .stat-card.spent::after { background: var(--danger); }
   .stat-card.free::after { background: var(--mint); }
   .stat-card.savings::after { background: #F6C90E; }
   .stat-label { font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
-  .stat-value { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 700; color: var(--navy); }
+  /* stat-value uses its own variable so it's always visible in both modes */
+  .stat-value { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 700; color: var(--stat-value); }
   .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
-  /* ── CARDS & GRIDS ── */
+  /* ── CARDS ── */
   .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
   .card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
-  .card-title { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--navy); margin-bottom: 20px; }
+  .card-title { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 20px; }
 
   /* ── DONUT CHART ── */
   .donut-wrap { display: flex; align-items: center; gap: 24px; }
@@ -188,12 +244,12 @@ const css = `
   .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .legend-name { color: var(--muted); flex: 1; }
-  .legend-val { font-weight: 600; color: var(--text); font-family: 'Syne', sans-serif; font-size: 12px; }
+  .legend-val { font-weight: 600; color: var(--text); font-size: 12px; }
 
   /* ── BAR CHART ── */
   .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-bottom: 24px; }
   .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
-  .bar { width: 100%; border-radius: 6px 6px 0 0; background: var(--mint); opacity: 0.3; min-height: 4px; transition: opacity 0.2s; }
+  .bar { width: 100%; border-radius: 6px 6px 0 0; background: var(--mint); opacity: 0.3; min-height: 4px; }
   .bar.active { opacity: 1; }
   .bar-label { font-size: 11px; color: var(--muted); }
 
@@ -220,32 +276,31 @@ const css = `
   .upload-zone { border: 2px dashed var(--border); border-radius: 20px; padding: 60px 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: var(--surface); margin-bottom: 24px; }
   .upload-zone:hover, .upload-zone.dragover { border-color: var(--mint); background: #00C89608; }
   .upload-icon { font-size: 48px; margin-bottom: 16px; }
-  .upload-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+  .upload-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
   .upload-sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
-  .btn-upload { display: inline-block; padding: 12px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
-  .btn-upload:hover { background: #00e0aa; }
+  .btn-upload { display: inline-block; padding: 12px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
   .format-pills { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
   .format-pill { padding: 4px 12px; background: #00C89615; color: var(--mint); border-radius: 20px; font-size: 12px; font-weight: 600; }
 
   /* ── GOALS ── */
-  .goals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-  .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
+  .goals-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+  .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); flex: 1; min-width: 260px; }
   .goal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .goal-name { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--navy); }
+  .goal-name { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--text); }
   .goal-emoji { font-size: 24px; }
   .goal-amounts { display: flex; justify-content: space-between; margin-bottom: 10px; align-items: flex-end; }
-  .goal-saved { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--navy); }
+  .goal-saved { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--stat-value); }
   .goal-target { font-size: 13px; color: var(--muted); }
   .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
   .progress-fill { height: 100%; background: var(--mint); border-radius: 3px; transition: width 0.6s ease; }
   .goal-meta { font-size: 12px; color: var(--muted); }
-  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; width: 100%; }
+  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; flex: 1; min-width: 260px; }
   .add-goal-card:hover { border-color: var(--mint); background: #00C89608; }
   .add-goal-icon { font-size: 28px; color: var(--muted); }
   .add-goal-text { font-size: 14px; color: var(--muted); font-weight: 500; }
 
   /* ── INSIGHTS ── */
-  .insight-card { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-deep) 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; border: 1px solid #ffffff10; position: relative; overflow: hidden; }
+  .insight-card { background: linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; border: 1px solid #ffffff10; position: relative; overflow: hidden; }
   .insight-card::before { content: '💡'; position: absolute; right: 24px; top: 50%; transform: translateY(-50%); font-size: 48px; opacity: 0.15; }
   .insight-label { font-size: 11px; color: var(--mint); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
   .insight-text { font-size: 16px; font-weight: 500; line-height: 1.5; max-width: 80%; color: white; }
@@ -259,21 +314,34 @@ const css = `
   .settings-row-label { font-size: 14px; color: var(--text); font-weight: 500; }
   .settings-row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .settings-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); background: var(--bg); outline: none; cursor: pointer; }
-  .btn-danger { padding: 8px 16px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: opacity 0.2s; white-space: nowrap; }
+  .btn-danger { padding: 8px 16px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { opacity: 0.85; }
-  .btn-outline { padding: 8px 16px; background: none; color: var(--mint); border: 1px solid var(--mint); border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s; white-space: nowrap; }
+  .btn-outline { padding: 8px 16px; background: none; color: var(--mint); border: 1px solid var(--mint); border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .btn-outline:hover { background: var(--mint); color: var(--navy-deep); }
+
+  /* ── THEME TOGGLE ── */
+  .theme-toggle {
+    display: flex; align-items: center; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 20px; padding: 3px;
+    gap: 2px; cursor: pointer;
+  }
+  .theme-toggle-btn {
+    padding: 6px 14px; border-radius: 16px; border: none; cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.2s; background: none;
+    color: var(--muted);
+  }
+  .theme-toggle-btn.active { background: var(--mint); color: var(--navy-deep); font-weight: 700; }
 
   /* ── MODAL ── */
   .modal-overlay { position: fixed; inset: 0; background: #00000070; z-index: 500; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .modal { background: var(--surface); border-radius: 20px; padding: 32px; width: 100%; max-width: 440px; box-shadow: 0 40px 80px #00000030; max-height: 90vh; overflow-y: auto; }
-  .modal-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--navy); margin-bottom: 24px; }
+  .modal { background: var(--surface); border-radius: 20px; padding: 32px; width: 100%; max-width: 440px; box-shadow: 0 40px 80px #00000030; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border); }
+  .modal-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 24px; }
   .modal-input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--text); background: var(--bg); outline: none; transition: border-color 0.2s; }
   .modal-input:focus { border-color: var(--mint); }
   .modal-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; margin-top: 16px; }
   .modal-actions { display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end; }
   .btn-cancel { padding: 12px 20px; background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: 14px; cursor: pointer; }
-  .btn-save { padding: 12px 24px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .btn-save { padding: 12px 24px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; }
   .btn-save:hover { background: #00e0aa; }
 
   /* ── SEARCH ── */
@@ -290,41 +358,26 @@ const css = `
   .sub-amount { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: var(--danger); }
 
   /* ── TOAST ── */
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy); color: white; padding: 14px 20px; border-radius: 12px; font-size: 14px; border-left: 3px solid var(--mint); box-shadow: 0 8px 24px #00000030; z-index: 999; animation: slideUp 0.3s ease; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy-deep); color: white; padding: 14px 20px; border-radius: 12px; font-size: 14px; border-left: 3px solid var(--mint); box-shadow: 0 8px 24px #00000030; z-index: 999; animation: slideUp 0.3s ease; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
   /* ── RESPONSIVE ── */
   @media (max-width: 768px) {
-    .sidebar {
-      transform: translateX(-100%);
-      z-index: 300;
-      pointer-events: none;
-    }
-    .sidebar.open {
-      transform: translateX(0);
-      pointer-events: all;
-    }
+    .sidebar { transform: translateX(-100%); z-index: 300; pointer-events: none; }
+    .sidebar.open { transform: translateX(0); pointer-events: all; }
     .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 250; pointer-events: none; }
     .mobile-overlay.open { display: block; pointer-events: all; }
     .mobile-header { display: flex !important; z-index: 200; }
     .app { display: block !important; }
-    .main {
-      margin-left: 0 !important;
-      padding: 80px 16px 32px !important;
-      width: 100vw !important;
-      position: relative !important;
-      z-index: 1 !important;
-      pointer-events: all !important;
-    }
+    .main { margin-left: 0 !important; padding: 80px 16px 32px !important; width: 100vw !important; position: relative !important; z-index: 1 !important; pointer-events: all !important; }
     .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
     .dashboard-grid { grid-template-columns: 1fr !important; }
-    .goals-grid { grid-template-columns: 1fr !important; }
+    .goals-grid { flex-direction: column !important; }
     .auth-card { padding: 32px 24px; }
     .donut-wrap { flex-direction: column; }
     .greeting { font-size: 22px !important; }
     .stat-value { font-size: 22px !important; }
     .income-banner { flex-direction: column; align-items: flex-start; gap: 10px; }
-    .income-input { width: 100% !important; }
     .settings-row { flex-wrap: wrap; }
     .tx-item { gap: 8px; }
     .cat-badge { display: none; }
@@ -332,7 +385,7 @@ const css = `
 `;
 
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
-function DonutChart({ data }) {
+function DonutChart({ data, currency }) {
   if (!data || data.length === 0) {
     return (
       <div className="empty-state">
@@ -351,6 +404,7 @@ function DonutChart({ data }) {
     offset += pct * circumference;
     return seg;
   });
+  const c = CURRENCIES[currency] || CURRENCIES.BWP;
   return (
     <div className="donut-wrap">
       <svg width={size} height={size} className="donut-svg">
@@ -361,11 +415,11 @@ function DonutChart({ data }) {
             strokeDasharray={`${s.dash} ${s.gap}`}
             strokeDashoffset={-s.offset + circumference * 0.25} />
         ))}
-        <text x={cx} y={cy - 6} textAnchor="middle" fill="#1A1A2E"
-          style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 13 }}>Total</text>
-        <text x={cx} y={cy + 10} textAnchor="middle" fill="#1A1A2E"
-          style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 11 }}>
-          {formatPula(total)}
+        <text x={cx} y={cy - 6} textAnchor="middle" fill="#00C896"
+          style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 11 }}>Total</text>
+        <text x={cx} y={cy + 8} textAnchor="middle" fill="#00C896"
+          style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 10 }}>
+          {c.symbol}{(total * c.rate).toLocaleString("en-BW", { maximumFractionDigits: 0 })}
         </text>
       </svg>
       <div className="donut-legend">
@@ -406,15 +460,74 @@ function BarChart({ data }) {
   );
 }
 
-// ─── PAGES ───────────────────────────────────────────────────────────────────
+// BATCH 1: Add Income Modal component
+function AddIncomeModal({ onClose, onSave, currency }) {
+  const [form, setForm] = useState({
+    sourceType: "Salary",
+    amount: "",
+    label: "",
+    date: new Date().toISOString().split("T")[0]
+  });
 
-// FIX: Monthly income input moved here from Settings
-function Dashboard({ user, transactions, goals, onUpdateUser }) {
+  const incomeTypes = ["Salary", "Business", "Allowance", "Gift", "Side Hustle", "Other"];
+
+  const handleSave = () => {
+    const amount = parseFloat(form.amount);
+    if (isNaN(amount) || amount <= 0) return;
+    onSave({
+      id: Date.now(),
+      sourceType: form.sourceType,
+      amount: amount,
+      label: form.label.trim() || undefined,
+      date: form.date
+    });
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">➕ Add Income</div>
+        
+        <label className="modal-label">Source Type</label>
+        <select className="modal-input" value={form.sourceType} onChange={e => setForm(f => ({ ...f, sourceType: e.target.value }))}>
+          {incomeTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <label className="modal-label">Amount ({currency})</label>
+        <input className="modal-input" type="number" placeholder="e.g. 5000" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+
+        <label className="modal-label">Label (optional)</label>
+        <input className="modal-input" placeholder="e.g. Freelance logo work" value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+
+        <label className="modal-label">Date</label>
+        <input className="modal-input" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onClose}>Cancel</button>
+          <button className="btn-save" onClick={handleSave}>Add Income</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PAGES ───────────────────────────────────────────────────────────────────
+// BATCH 1: Updated Dashboard with multi-source income
+function Dashboard({ user, transactions, goals, incomes, onAddIncome, currency }) {
   const tagline = taglines[new Date().getDay() % taglines.length];
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
-  const income = user.income || 0;
-  const freeCash = Math.max(0, income - totalSpent);
+  const grossIncome = getGrossIncome(incomes, user.income);
+  const freeCash = Math.max(0, grossIncome - totalSpent);
   const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
+  const [showIncomeModal, setShowIncomeModal] = useState(false);
+  const [showCreditedIncome, setShowCreditedIncome] = useState(false);
+
+  // BATCH 1: Get credited transactions (credit type with incomeType)
+  const creditedTransactions = transactions.filter(t => t.type === "credit" && t.incomeType);
+  
+  // BATCH 1: Sort incomes by date (newest first)
+  const sortedIncomes = [...(incomes || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
@@ -442,32 +555,66 @@ function Dashboard({ user, transactions, goals, onUpdateUser }) {
         <div className="greeting-tagline">{tagline}</div>
       </div>
 
-      {/* Monthly income input lives here on the dashboard */}
+      {/* BATCH 1: Enhanced income banner */}
       <div className="income-banner">
-        <div className="income-label">💰 Monthly income — used to calculate your free cash</div>
-        <input
-          className="income-input"
-          type="number"
-          placeholder="e.g. 8000"
-          defaultValue={income || ""}
-          onChange={e => onUpdateUser({ income: parseFloat(e.target.value) || 0 })}
-        />
+        <div className="income-header">
+          <div>
+            <span className="income-total-label">💰 Gross Income</span>
+            <span className="income-total">{formatMoney(grossIncome, currency)}</span>
+          </div>
+          <button className="btn-add-income" onClick={() => setShowIncomeModal(true)}>＋ Add Income</button>
+        </div>
+        
+        {(sortedIncomes.length > 0 || creditedTransactions.length > 0) && (
+          <div className="income-sources">
+            {sortedIncomes.map(inc => (
+              <div key={inc.id} className="income-source-row">
+                <div className="income-source-type">
+                  <span className="income-badge">{inc.sourceType}</span>
+                  {inc.label && <span className="income-source-label">{inc.label}</span>}
+                </div>
+                <div className="income-source-amount">{formatMoney(inc.amount, currency)}</div>
+              </div>
+            ))}
+            
+            {creditedTransactions.length > 0 && (
+              <div className="income-credited-section">
+                <div className="income-toggle" onClick={() => setShowCreditedIncome(!showCreditedIncome)}>
+                  {showCreditedIncome ? "▼" : "▶"} Credited Income ({creditedTransactions.length})
+                </div>
+                {showCreditedIncome && (
+                  <div className="income-credited-list">
+                    {creditedTransactions.map(tx => (
+                      <div key={tx.id} className="income-source-row">
+                        <div className="income-source-type">
+                          <span className="income-badge">{tx.incomeType}</span>
+                          <span className="income-source-label">{tx.description}</span>
+                        </div>
+                        <div className="income-source-amount">{formatMoney(tx.amount, currency)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="stats-grid">
         <div className="stat-card spent">
           <div className="stat-label">Total Spent</div>
-          <div className="stat-value">{formatPula(totalSpent)}</div>
+          <div className="stat-value">{formatMoney(totalSpent, currency)}</div>
           <div className="stat-sub">This month</div>
         </div>
         <div className="stat-card free">
           <div className="stat-label">Free Cash</div>
-          <div className="stat-value">{formatPula(freeCash)}</div>
+          <div className="stat-value">{formatMoney(freeCash, currency)}</div>
           <div className="stat-sub">After essentials</div>
         </div>
         <div className="stat-card savings">
           <div className="stat-label">Savings Progress</div>
-          <div className="stat-value">{formatPula(totalSaved)}</div>
+          <div className="stat-value">{formatMoney(totalSaved, currency)}</div>
           <div className="stat-sub">Across {goals.length} goal{goals.length !== 1 ? "s" : ""}</div>
         </div>
       </div>
@@ -475,7 +622,7 @@ function Dashboard({ user, transactions, goals, onUpdateUser }) {
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-title">Spending by Category</div>
-          <DonutChart data={chartData} />
+          <DonutChart data={chartData} currency={currency} />
         </div>
         <div className="card">
           <div className="card-title">Monthly Trend</div>
@@ -503,13 +650,23 @@ function Dashboard({ user, transactions, goals, onUpdateUser }) {
                     <div className="tx-date">{t.date}</div>
                   </div>
                   <span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{t.category}</span>
-                  <div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatPula(t.amount)}</div>
+                  <div className={`tx-amount ${t.type}`}>
+                    {t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {showIncomeModal && (
+        <AddIncomeModal
+          onClose={() => setShowIncomeModal(false)}
+          onSave={onAddIncome}
+          currency={currency}
+        />
+      )}
     </div>
   );
 }
@@ -521,9 +678,7 @@ function UploadPage({ onUpload }) {
 
   const handleFile = (file) => {
     if (!file) return;
-    // Simulate parsing — generates realistic mock transactions
     const mockTx = Array.from({ length: 8 }, (_, i) => ({
-      // FIX: give each transaction a unique id to prevent duplicates on re-import
       id: `${file.name}-${file.size}-${i}`,
       date: new Date(Date.now() - i * 86400000 * 3).toISOString().split("T")[0],
       description: ["Choppies Supermarket","FNB Transfer","BPC Electricity","Orange Botswana","Pick n Pay","Debonairs Pizza","Shell Gaborone","Clicks Pharmacy"][i],
@@ -542,7 +697,6 @@ function UploadPage({ onUpload }) {
         <div className="greeting" style={{ fontSize: 24 }}>Upload Statement</div>
         <div className="greeting-tagline">PDF or CSV from your bank — processed right here in your browser</div>
       </div>
-
       {!preview ? (
         <div className={`upload-zone ${dragover ? "dragover" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setDragover(true); }}
@@ -564,7 +718,7 @@ function UploadPage({ onUpload }) {
         <div>
           <div className="card" style={{ marginBottom: 20 }}>
             <div className="card-title">Preview — {preview.filename}</div>
-            <p style={{ fontSize: 14, color: COLORS.textMuted, marginBottom: 16 }}>
+            <p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 16 }}>
               We found {preview.transactions.length} transactions. Review and confirm below.
             </p>
             <div className="tx-list">
@@ -578,7 +732,7 @@ function UploadPage({ onUpload }) {
                       <div className="tx-date">{t.date}</div>
                     </div>
                     <span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{t.category}</span>
-                    <div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatPula(t.amount)}</div>
+                    <div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}P {t.amount.toFixed(2)}</div>
                   </div>
                 );
               })}
@@ -596,13 +750,13 @@ function UploadPage({ onUpload }) {
   );
 }
 
-function TransactionsPage({ transactions }) {
+// BATCH 1: Updated TransactionsPage signature (added setTransactions prop for future features)
+function TransactionsPage({ transactions, setTransactions, currency }) {
   const [search, setSearch] = useState("");
   const filtered = transactions.filter(t =>
     t.description.toLowerCase().includes(search.toLowerCase()) ||
     t.category.toLowerCase().includes(search.toLowerCase())
   );
-
   return (
     <div>
       <div className="page-header">
@@ -633,7 +787,9 @@ function TransactionsPage({ transactions }) {
                     <div className="tx-date">{t.date}</div>
                   </div>
                   <span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{t.category}</span>
-                  <div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatPula(t.amount)}</div>
+                  <div className={`tx-amount ${t.type}`}>
+                    {t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}
+                  </div>
                 </div>
               );
             })}
@@ -644,15 +800,14 @@ function TransactionsPage({ transactions }) {
   );
 }
 
-function InsightsPage({ transactions }) {
+function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
     catMap[t.category] = (catMap[t.category] || 0) + t.amount;
   });
   const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  const subs = transactions.filter(t => ["Bills", "Entertainment"].includes(t.category) && t.type === "debit");
-  const hasData = transactions.length > 0;
+  const subs = transactions.filter(t => ["Bills","Entertainment"].includes(t.category) && t.type === "debit");
 
   return (
     <div>
@@ -660,18 +815,16 @@ function InsightsPage({ transactions }) {
         <div className="greeting" style={{ fontSize: 24 }}>Insights</div>
         <div className="greeting-tagline">Patterns in your spending</div>
       </div>
-
-      {hasData && (
+      {transactions.length > 0 && (
         <div className="insight-card">
           <div className="insight-label">Key Insight</div>
           <div className="insight-text">
             {topCats[0]
-              ? `Your biggest spend is ${topCats[0][0]} at ${formatPula(topCats[0][1])}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}`
+              ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}`
               : "Keep uploading statements to unlock insights."}
           </div>
         </div>
       )}
-
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-title">Top Categories</div>
@@ -686,8 +839,8 @@ function InsightsPage({ transactions }) {
             return (
               <div key={i} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.text }}>{cat.icon} {name}</span>
-                  <span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: COLORS.navy }}>{formatPula(val)}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span>
+                  <span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span>
                 </div>
                 <div className="progress-bar">
                   <div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} />
@@ -696,7 +849,6 @@ function InsightsPage({ transactions }) {
             );
           })}
         </div>
-
         <div className="card">
           <div className="card-title">Recurring Subscriptions</div>
           {subs.length === 0 ? (
@@ -710,7 +862,7 @@ function InsightsPage({ transactions }) {
                 <div className="sub-name">{s.description}</div>
                 <div className="sub-freq">Monthly</div>
               </div>
-              <div className="sub-amount">{formatPula(s.amount)}/mo</div>
+              <div className="sub-amount">{formatMoney(s.amount, currency)}/mo</div>
             </div>
           ))}
         </div>
@@ -719,7 +871,7 @@ function InsightsPage({ transactions }) {
   );
 }
 
-function GoalsPage({ goals, onAdd }) {
+function GoalsPage({ goals, onAdd, currency }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: "", target: "", deadline: "", emoji: "🎯" });
   const emojis = ["🎯","✈️","🏠","🚗","📱","💍","🎓","💼","🏋️","🎸"];
@@ -737,10 +889,9 @@ function GoalsPage({ goals, onAdd }) {
         <div className="greeting" style={{ fontSize: 24 }}>Goals</div>
         <div className="greeting-tagline">Track what you're saving toward</div>
       </div>
-
       <div className="goals-grid">
         {goals.length === 0 && (
-          <div style={{ gridColumn: "1/-1" }}>
+          <div style={{ gridColumn: "1/-1", width: "100%" }}>
             <div className="empty-state" style={{ padding: "60px 20px" }}>
               <div className="empty-icon">🎯</div>
               <div className="empty-text">No goals yet. Add one.</div>
@@ -760,15 +911,15 @@ function GoalsPage({ goals, onAdd }) {
                 <div className="goal-emoji">{g.emoji}</div>
               </div>
               <div className="goal-amounts">
-                <div className="goal-saved">{formatPula(g.saved)}</div>
-                <div className="goal-target">of {formatPula(g.target)}</div>
+                <div className="goal-saved">{formatMoney(g.saved, currency)}</div>
+                <div className="goal-target">of {formatMoney(g.target, currency)}</div>
               </div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${pct}%` }} />
               </div>
               <div className="goal-meta">
                 {pct.toFixed(0)}% complete
-                {weekly !== null && ` · Save ${formatPula(weekly)}/week`}
+                {weekly !== null && ` · Save ${formatMoney(weekly, currency)}/week`}
                 {g.deadline && ` · Due ${g.deadline}`}
               </div>
             </div>
@@ -779,7 +930,6 @@ function GoalsPage({ goals, onAdd }) {
           <div className="add-goal-text">Add a goal</div>
         </button>
       </div>
-
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -787,7 +937,7 @@ function GoalsPage({ goals, onAdd }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               {emojis.map(e => (
                 <button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))}
-                  style={{ fontSize: 22, background: form.emoji === e ? "#00C89620" : "none", border: `1px solid ${form.emoji === e ? "#00C896" : "#E2E8F0"}`, borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}>
+                  style={{ fontSize: 22, background: form.emoji === e ? "#00C89620" : "none", border: `1px solid ${form.emoji === e ? "#00C896" : "var(--border)"}`, borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}>
                   {e}
                 </button>
               ))}
@@ -795,7 +945,7 @@ function GoalsPage({ goals, onAdd }) {
             <label className="modal-label">Goal Name</label>
             <input className="modal-input" placeholder="e.g. Trip to Cape Town"
               value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-            <label className="modal-label">Target Amount (P)</label>
+            <label className="modal-label">Target Amount (BWP)</label>
             <input className="modal-input" type="number" placeholder="5000"
               value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} />
             <label className="modal-label">Deadline (optional)</label>
@@ -812,8 +962,7 @@ function GoalsPage({ goals, onAdd }) {
   );
 }
 
-// FIX: Monthly income removed from settings — it now lives on the dashboard
-function SettingsPage({ user, onLogout, onClearData }) {
+function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange }) {
   return (
     <div>
       <div className="page-header">
@@ -836,14 +985,48 @@ function SettingsPage({ user, onLogout, onClearData }) {
       <div className="settings-section">
         <div className="settings-title">Preferences</div>
         <div className="settings-card">
+
+          {/* DARK/LIGHT MODE TOGGLE */}
           <div className="settings-row">
-            <div><div className="settings-row-label">Currency</div><div className="settings-row-sub">Used across all displays</div></div>
-            <select className="settings-select">
-              <option>BWP — Pula</option>
-              <option>ZAR — Rand</option>
-              <option>USD — Dollar</option>
+            <div>
+              <div className="settings-row-label">Theme</div>
+              <div className="settings-row-sub">Choose your display preference</div>
+            </div>
+            <div className="theme-toggle">
+              <button
+                className={`theme-toggle-btn ${theme === "light" ? "active" : ""}`}
+                onClick={() => onThemeChange("light")}>
+                ☀️ Light
+              </button>
+              <button
+                className={`theme-toggle-btn ${theme === "system" ? "active" : ""}`}
+                onClick={() => onThemeChange("system")}>
+                Auto
+              </button>
+              <button
+                className={`theme-toggle-btn ${theme === "dark" ? "active" : ""}`}
+                onClick={() => onThemeChange("dark")}>
+                🌙 Dark
+              </button>
+            </div>
+          </div>
+
+          {/* CURRENCY SELECTOR — changes all money displays app-wide */}
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-label">Currency</div>
+              <div className="settings-row-sub">All amounts convert from BWP at current rates</div>
+            </div>
+            <select
+              className="settings-select"
+              value={currency}
+              onChange={e => onCurrencyChange(e.target.value)}>
+              {Object.entries(CURRENCIES).map(([code, c]) => (
+                <option key={code} value={code}>{c.name}</option>
+              ))}
             </select>
           </div>
+
         </div>
       </div>
 
@@ -877,14 +1060,45 @@ function SettingsPage({ user, onLogout, onClearData }) {
 export default function SpendSight() {
   const [user, setUser] = useLocalStorage("ss_user", null);
   const [transactions, setTransactions] = useLocalStorage("ss_transactions", []);
-  // FIX: track which files have been imported to prevent duplicate uploads
   const [importedFiles, setImportedFiles] = useLocalStorage("ss_imported_files", []);
   const [goals, setGoals] = useLocalStorage("ss_goals", []);
+  // BATCH 1: New incomes array
+  const [incomes, setIncomes] = useLocalStorage("ss_incomes", []);
+  const [currency, setCurrency] = useLocalStorage("ss_currency", "BWP");
+  // theme: "light" | "dark" | "system"
+  const [theme, setTheme] = useLocalStorage("ss_theme", "system");
   const [page, setPage] = useState("dashboard");
   const [authTab, setAuthTab] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+
+  // Apply dark/light class to <html> whenever theme changes
+  useEffect(() => {
+    const html = document.documentElement;
+    if (theme === "dark") {
+      html.classList.add("dark");
+    } else if (theme === "light") {
+      html.classList.remove("dark");
+    } else {
+      // "system" — follow OS preference
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (prefersDark) html.classList.add("dark");
+      else html.classList.remove("dark");
+    }
+  }, [theme]);
+
+  // Also listen for OS preference changes when in "system" mode
+  useEffect(() => {
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e) => {
+      if (e.matches) document.documentElement.classList.add("dark");
+      else document.documentElement.classList.remove("dark");
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [theme]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
 
@@ -896,7 +1110,6 @@ export default function SpendSight() {
     showToast(`Welcome${authTab === "signup" ? "" : " back"}, ${name}!`);
   };
 
-  // FIX: check for duplicate file before importing
   const handleUpload = (newTx, fileKey) => {
     if (importedFiles.includes(fileKey)) {
       showToast("⚠️ This statement has already been imported.");
@@ -908,13 +1121,19 @@ export default function SpendSight() {
     showToast(`${newTx.length} transactions imported!`);
   };
 
+  // BATCH 1: Add income handler
+  const handleAddIncome = (income) => {
+    setIncomes(prev => [...prev, income]);
+    showToast(`Added ${income.sourceType}: ${formatMoney(income.amount, currency)}`);
+  };
+
   const navItems = [
-    { id: "dashboard", icon: "🏠", label: "Dashboard" },
-    { id: "upload", icon: "📂", label: "Upload" },
+    { id: "dashboard",    icon: "🏠", label: "Dashboard" },
+    { id: "upload",       icon: "📂", label: "Upload" },
     { id: "transactions", icon: "📋", label: "Transactions" },
-    { id: "insights", icon: "📊", label: "Insights" },
-    { id: "goals", icon: "🎯", label: "Goals" },
-    { id: "settings", icon: "⚙️", label: "Settings" },
+    { id: "insights",     icon: "📊", label: "Insights" },
+    { id: "goals",        icon: "🎯", label: "Goals" },
+    { id: "settings",     icon: "⚙️", label: "Settings" },
   ];
 
   if (!user) {
@@ -924,7 +1143,7 @@ export default function SpendSight() {
         <div className="auth-screen">
           <div className="auth-card">
             <div className="auth-logo">
-              <span className="auth-logo-text">Spend<span style={{ color: COLORS.mint }}>Sight</span></span>
+              <span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span>
             </div>
             <div className="auth-tagline">Your money, your clarity.</div>
             <div className="auth-tabs">
@@ -987,22 +1206,28 @@ export default function SpendSight() {
             <span /><span /><span />
           </button>
           <span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>
-            Spend<span style={{ color: COLORS.mint }}>Sight</span>
+            Spend<span style={{ color: "#00C896" }}>Sight</span>
           </span>
           <div style={{ width: 30 }} />
         </div>
 
         <main className="main">
-          {page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} onUpdateUser={(u) => setUser(usr => ({ ...usr, ...u }))} />}
+          {/* BATCH 1: Pass incomes and onAddIncome to Dashboard */}
+          {page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} onAddIncome={handleAddIncome} currency={currency} />}
           {page === "upload" && <UploadPage onUpload={handleUpload} />}
-          {page === "transactions" && <TransactionsPage transactions={transactions} />}
-          {page === "insights" && <InsightsPage transactions={transactions} />}
-          {page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} />}
+          {/* BATCH 1: Pass setTransactions to TransactionsPage */}
+          {page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} />}
+          {page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}
+          {page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} currency={currency} />}
           {page === "settings" && (
             <SettingsPage
               user={user}
               onLogout={() => { setUser(null); setPage("dashboard"); }}
-              onClearData={() => { setTransactions([]); setGoals([]); setImportedFiles([]); showToast("All data cleared."); }}
+              onClearData={() => { setTransactions([]); setGoals([]); setImportedFiles([]); setIncomes([]); showToast("All data cleared."); }}
+              currency={currency}
+              onCurrencyChange={setCurrency}
+              theme={theme}
+              onThemeChange={setTheme}
             />
           )}
         </main>
