@@ -84,7 +84,6 @@ function getTxSplits(tx) { return tx.splits || []; }
 function getTxIncomeType(tx) { return tx.incomeType || ""; }
 function getTxIsRecurring(tx) { return tx.isRecurring || false; }
 
-// Helper: Get ISO week number
 function getWeekNumber(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -93,12 +92,11 @@ function getWeekNumber(date) {
   return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// Helper: Get day of week name
 function getDayName(dayIndex) {
   return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][dayIndex];
 }
 
-// ─── STYLES (appended new CSS for What-If, anomaly, timing insights) ─────────
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
@@ -179,6 +177,18 @@ const css = `
   .mobile-overlay.open { display: block; pointer-events: all; }
 
   .main { margin-left: 240px; flex: 1; padding: 40px; min-height: 100vh; background: var(--bg); }
+
+  /* Session timeout overlay */
+  .session-overlay {
+    position: fixed; inset: 0; background: var(--navy-deep); z-index: 600;
+    display: flex; align-items: center; justify-content: center;
+    background-image: radial-gradient(ellipse at 20% 50%, #00C89610 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%);
+  }
+  .session-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; }
+  .session-logo { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; color: white; margin-bottom: 24px; }
+  .session-message { color: #ffffffb0; font-size: 14px; margin-bottom: 32px; }
+  .session-btn { padding: 14px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 12px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 16px; cursor: pointer; }
 
   .auth-screen {
     min-height: 100vh; background: var(--navy-deep);
@@ -266,7 +276,6 @@ const css = `
   .bar.active { opacity: 1; }
   .bar-label { font-size: 11px; color: var(--muted); }
 
-  /* Horizontal bar chart for timing insights */
   .timing-bar-chart { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
   .timing-bar-row { display: flex; align-items: center; gap: 12px; }
   .timing-bar-label { width: 80px; font-size: 12px; color: var(--muted); }
@@ -278,7 +287,12 @@ const css = `
   .empty-text { color: var(--muted); font-size: 14px; }
   .empty-sub { color: var(--muted); font-size: 12px; margin-top: 6px; opacity: 0.7; }
 
-  /* Transactions */
+  /* Receipt scan styles */
+  .scan-card { margin-top: 24px; }
+  .preview-thumb { width: 80px; height: 80px; border-radius: 12px; object-fit: cover; margin-top: 12px; }
+  .shimmer { background: linear-gradient(90deg, var(--border) 25%, var(--surface) 50%, var(--border) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 12px; padding: 16px; text-align: center; color: var(--muted); }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
   .tx-list { display: flex; flex-direction: column; }
   .tx-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); position: relative; }
   .tx-checkbox { margin-top: 10px; flex-shrink: 0; }
@@ -346,7 +360,6 @@ const css = `
   .insight-label { font-size: 11px; color: var(--mint); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
   .insight-text { font-size: 16px; font-weight: 500; line-height: 1.5; max-width: 80%; color: white; }
 
-  /* What-If Calculator styles */
   .whatif-scenario { margin-bottom: 32px; padding: 20px; background: var(--bg); border-radius: 16px; border: 1px solid var(--border); }
   .whatif-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
   .whatif-input-group { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
@@ -519,7 +532,7 @@ function BarChart({ data }) {
   );
 }
 
-// ─── WHAT-IF PAGE (Feature 8) ────────────────────────────────────────────────
+// ─── WHAT-IF PAGE ─────────────────────────────────────────────────────────────
 function WhatIfPage({ transactions, incomes, currency }) {
   const [habitName, setHabitName] = useState("");
   const [habitDays, setHabitDays] = useState(30);
@@ -534,23 +547,19 @@ function WhatIfPage({ transactions, incomes, currency }) {
   const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const monthlyIncome = grossIncome;
   
-  // Calculate category spend
   const categorySpend = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
     categorySpend[t.category] = (categorySpend[t.category] || 0) + t.amount;
   });
   const monthlyCategorySpend = categorySpend[reduceCategory] || 0;
   
-  // Scenario A calculation
   const habitTotalCost = parseFloat(habitCost) || 0;
   const habitTotal = habitTotalCost * habitTimesPerWeek * (habitDays / 7);
   const habitPercentOfIncome = monthlyIncome > 0 ? (habitTotal / monthlyIncome) * 100 : 0;
   
-  // Scenario B calculation
   const reducedAmount = monthlyCategorySpend * (reducePercent / 100);
   const yearlySavings = reducedAmount * 12;
   
-  // Scenario C calculation
   const calculateDebt = (balance, rate, payment, extra = 0) => {
     if (!balance || !rate || !payment || balance <= 0) return null;
     const monthlyRate = rate / 100 / 12;
@@ -579,7 +588,6 @@ function WhatIfPage({ transactions, incomes, currency }) {
         <div className="greeting-tagline">See how small changes can make a big difference</div>
       </div>
       
-      {/* Scenario A - Skip a habit */}
       <div className="whatif-scenario">
         <div className="whatif-title">Scenario A: Skip a habit</div>
         <div className="whatif-input-group">
@@ -603,7 +611,6 @@ function WhatIfPage({ transactions, incomes, currency }) {
         )}
       </div>
       
-      {/* Scenario B - Reduce a category */}
       <div className="whatif-scenario">
         <div className="whatif-title">Scenario B: Reduce a category</div>
         <div className="whatif-input-group">
@@ -623,7 +630,6 @@ function WhatIfPage({ transactions, incomes, currency }) {
         </div>
       </div>
       
-      {/* Scenario C - Pay off debt faster */}
       <div className="whatif-scenario">
         <div className="whatif-title">Scenario C: Pay off debt faster</div>
         <div className="whatif-input-group">
@@ -839,12 +845,67 @@ function UploadPage({ onUpload }) {
     <div>
       <div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Upload Statement</div><div className="greeting-tagline">PDF or CSV from your bank — processed right here in your browser</div></div>
       {!preview ? (
-        <div className={`upload-zone ${dragover ? "dragover" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragover(true); }} onDragLeave={() => setDragover(false)} onDrop={handleDrop} onClick={() => fileRef.current.click()}>
-          <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div><div className="upload-sub">Your data is processed locally and never leaves your device</div>
-          <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
-          <div className="format-pills"><span className="format-pill">PDF</span><span className="format-pill">CSV</span></div>
-          <input ref={fileRef} type="file" accept=".pdf,.csv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
-        </div>
+        <>
+          <div className={`upload-zone ${dragover ? "dragover" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragover(true); }} onDragLeave={() => setDragover(false)} onDrop={handleDrop} onClick={() => fileRef.current.click()}>
+            <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div><div className="upload-sub">Your data is processed locally and never leaves your device</div>
+            <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
+            <div className="format-pills"><span className="format-pill">PDF</span><span className="format-pill">CSV</span></div>
+            <input ref={fileRef} type="file" accept=".pdf,.csv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
+          </div>
+          
+          {/* FEATURE 2: Receipt Photo Scan */}
+          <div className="card scan-card">
+            <div className="card-title">📷 Scan a Receipt</div>
+            <div style={{ textAlign: "center" }}>
+              <input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => {
+                const file = e.target.files[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    const previewImg = ev.target.result;
+                    const shimmerDiv = document.getElementById("scan-shimmer");
+                    if (shimmerDiv) shimmerDiv.style.display = "block";
+                    setTimeout(() => {
+                      if (shimmerDiv) shimmerDiv.style.display = "none";
+                      const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30);
+                      const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] };
+                      document.getElementById("scan-result").innerHTML = `
+                        <div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 12px; object-fit: cover;" /></div>
+                        <div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div>
+                        <div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div>
+                        <div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div>
+                        <button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>
+                      `;
+                      document.getElementById("scan-add-btn")?.addEventListener("click", () => {
+                        const amount = parseFloat(document.getElementById("scan-amount").value);
+                        const description = document.getElementById("scan-merchant").value;
+                        const date = document.getElementById("scan-date").value;
+                        if (amount && description) {
+                          document.getElementById("receipt-input").value = "";
+                          document.getElementById("scan-result").innerHTML = "";
+                          const mockAddBtn = document.createElement("button");
+                          mockAddBtn.onclick = () => {
+                            const newTx = {
+                              id: Date.now(), date, description, amount, type: "debit", category: "Other",
+                              tags: [], notes: "", splits: [], incomeType: "", isRecurring: false
+                            };
+                            onUpload([newTx], `receipt-${Date.now()}`);
+                          };
+                          mockAddBtn.click();
+                        }
+                      });
+                    }, 1500);
+                  };
+                  reader.readAsDataURL(file);
+                }
+              }} />
+              <button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button>
+              <div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div>
+              <div id="scan-result"></div>
+              <div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div>
+            </div>
+          </div>
+        </>
       ) : (
         <div>
           <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {preview.filename}</div><p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 16 }}>We found {preview.transactions.length} transactions. Review and confirm below.</p>
@@ -870,7 +931,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
     description: "", amount: "", date: new Date().toISOString().split("T")[0],
     type: "debit", incomeType: "", category: "Other", tags: [], notes: ""
   });
-  const [tagInput, setTagInput] = useState("");
   const [splitLines, setSplitLines] = useState([{ description: "", amount: "", category: "Other" }]);
   
   const filtered = transactions.filter(t =>
@@ -1063,158 +1123,84 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   );
 }
 
-// FEATURE 6 & 7: Enhanced InsightsPage with anomaly detection and real subscription tracker
 function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => { catMap[t.category] = (catMap[t.category] || 0) + t.amount; });
   const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
   
-  // FEATURE 7: Real subscription detection (replaces mock)
   const detectSubscriptions = () => {
     const debitTx = transactions.filter(t => t.type === "debit");
     const groups = new Map();
-    
     debitTx.forEach(tx => {
       const key = tx.description.trim().toLowerCase();
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(tx);
     });
-    
     const subscriptions = [];
     for (const [desc, txList] of groups.entries()) {
       if (txList.length >= 2) {
         const amounts = txList.map(t => t.amount);
         const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-        
-        // Calculate frequency
         const dates = txList.map(t => new Date(t.date)).sort((a, b) => a - b);
-        let avgGap = 0;
         let frequencyLabel = "Irregular";
         let multiplier = 12;
-        
         if (dates.length >= 2) {
           let totalGap = 0;
           for (let i = 1; i < dates.length; i++) {
             totalGap += (dates[i] - dates[i-1]) / (1000 * 60 * 60 * 24);
           }
-          avgGap = totalGap / (dates.length - 1);
-          
-          if (avgGap >= 25 && avgGap <= 35) {
-            frequencyLabel = "Monthly";
-            multiplier = 12;
-          } else if (avgGap >= 6 && avgGap <= 8) {
-            frequencyLabel = "Weekly";
-            multiplier = 52;
-          } else {
-            multiplier = 12;
-          }
+          const avgGap = totalGap / (dates.length - 1);
+          if (avgGap >= 25 && avgGap <= 35) { frequencyLabel = "Monthly"; multiplier = 12; }
+          else if (avgGap >= 6 && avgGap <= 8) { frequencyLabel = "Weekly"; multiplier = 52; }
         }
-        
         const annualCost = avgAmount * multiplier;
-        subscriptions.push({
-          name: txList[0].description,
-          frequency: frequencyLabel,
-          monthlyCost: avgAmount,
-          annualCost: annualCost,
-          occurrences: txList.length
-        });
+        subscriptions.push({ name: txList[0].description, frequency: frequencyLabel, monthlyCost: avgAmount, annualCost, occurrences: txList.length });
       }
     }
-    
     return subscriptions.sort((a, b) => b.annualCost - a.annualCost).slice(0, 10);
   };
   
   const subscriptions = detectSubscriptions();
   const totalAnnualSubs = subscriptions.reduce((sum, s) => sum + s.annualCost, 0);
   
-  // FEATURE 6: Anomaly Detection
   const detectAnomaly = () => {
     const debitTx = transactions.filter(t => t.type === "debit");
     if (debitTx.length < 6) return { hasData: false, message: "Add more transactions to detect anomalies." };
-    
-    // Group by week
     const weeks = new Map();
     debitTx.forEach(tx => {
       const weekKey = `${new Date(tx.date).getFullYear()}-W${getWeekNumber(tx.date)}`;
       if (!weeks.has(weekKey)) weeks.set(weekKey, []);
       weeks.get(weekKey).push(tx.amount);
     });
-    
-    const weekTotals = Array.from(weeks.entries()).map(([week, amounts]) => ({
-      week,
-      total: amounts.reduce((a, b) => a + b, 0),
-      date: new Date(week.split("-W")[0], 0, 1)
-    })).sort((a, b) => a.date - b.date);
-    
+    const weekTotals = Array.from(weeks.entries()).map(([week, amounts]) => ({ week, total: amounts.reduce((a, b) => a + b, 0), date: new Date(week.split("-W")[0], 0, 1) })).sort((a, b) => a.date - b.date);
     if (weekTotals.length < 3) return { hasData: false, message: "Add more transactions to detect anomalies." };
-    
     const lastWeek = weekTotals[weekTotals.length - 1];
     const prevWeeks = weekTotals.slice(0, -1);
     const avgPrev = prevWeeks.reduce((sum, w) => sum + w.total, 0) / prevWeeks.length;
-    
     if (lastWeek.total > avgPrev * 1.5) {
       const percentIncrease = ((lastWeek.total - avgPrev) / avgPrev) * 100;
-      return {
-        hasData: true,
-        isAnomaly: true,
-        message: `⚠️ You spent ${percentIncrease.toFixed(0)}% more than usual this week (${formatMoney(lastWeek.total, currency)} vs your avg ${formatMoney(avgPrev, currency)}).`,
-        percent: percentIncrease
-      };
+      return { hasData: true, isAnomaly: true, message: `⚠️ You spent ${percentIncrease.toFixed(0)}% more than usual this week (${formatMoney(lastWeek.total, currency)} vs your avg ${formatMoney(avgPrev, currency)}).` };
     } else {
-      return {
-        hasData: true,
-        isAnomaly: false,
-        message: `✅ Your spending this week (${formatMoney(lastWeek.total, currency)}) is within your normal range (avg ${formatMoney(avgPrev, currency)}).`
-      };
+      return { hasData: true, isAnomaly: false, message: `✅ Your spending this week (${formatMoney(lastWeek.total, currency)}) is within your normal range (avg ${formatMoney(avgPrev, currency)}).` };
     }
   };
   
-  // FEATURE 6: Timing Insights
   const getTimingInsights = () => {
     const debitTx = transactions.filter(t => t.type === "debit");
     if (debitTx.length === 0) return null;
-    
-    // By day of week
     const dayTotals = [0, 0, 0, 0, 0, 0, 0];
-    debitTx.forEach(tx => {
-      const day = new Date(tx.date).getDay();
-      dayTotals[day] += tx.amount;
-    });
-    
+    debitTx.forEach(tx => { const day = new Date(tx.date).getDay(); dayTotals[day] += tx.amount; });
     const maxDayIndex = dayTotals.indexOf(Math.max(...dayTotals));
     const highestDay = getDayName(maxDayIndex);
-    
-    // By day of month
     const dayOfMonthTotals = {};
-    debitTx.forEach(tx => {
-      const dayNum = new Date(tx.date).getDate();
-      dayOfMonthTotals[dayNum] = (dayOfMonthTotals[dayNum] || 0) + tx.amount;
-    });
-    
-    const topDays = Object.entries(dayOfMonthTotals)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(d => parseInt(d[0]));
-    
-    let earlyMonthInsight = null;
-    let lateMonthInsight = null;
-    
-    if (topDays.some(d => d >= 1 && d <= 5)) {
-      earlyMonthInsight = "You tend to overspend early in the month — common after payday.";
-    }
-    if (topDays.some(d => d >= 25 && d <= 31)) {
-      lateMonthInsight = "You tend to overspend at month end.";
-    }
-    
-    // Create bar chart data (normalized)
+    debitTx.forEach(tx => { const dayNum = new Date(tx.date).getDate(); dayOfMonthTotals[dayNum] = (dayOfMonthTotals[dayNum] || 0) + tx.amount; });
+    const topDays = Object.entries(dayOfMonthTotals).sort((a, b) => b[1] - a[1]).slice(0, 3).map(d => parseInt(d[0]));
+    let earlyMonthInsight = null, lateMonthInsight = null;
+    if (topDays.some(d => d >= 1 && d <= 5)) earlyMonthInsight = "You tend to overspend early in the month — common after payday.";
+    if (topDays.some(d => d >= 25 && d <= 31)) lateMonthInsight = "You tend to overspend at month end.";
     const maxDayTotal = Math.max(...dayTotals);
-    const barData = dayTotals.map((total, idx) => ({
-      label: getDayName(idx).slice(0, 3),
-      value: total,
-      percent: maxDayTotal > 0 ? (total / maxDayTotal) * 100 : 0
-    }));
-    
+    const barData = dayTotals.map((total, idx) => ({ label: getDayName(idx).slice(0, 3), value: total, percent: maxDayTotal > 0 ? (total / maxDayTotal) * 100 : 0 }));
     return { barData, highestDay, earlyMonthInsight, lateMonthInsight };
   };
   
@@ -1223,92 +1209,15 @@ function InsightsPage({ transactions, currency }) {
   
   return (
     <div>
-      <div className="page-header">
-        <div className="greeting" style={{ fontSize: 24 }}>Insights</div>
-        <div className="greeting-tagline">Patterns in your spending</div>
-      </div>
-      
-      {transactions.length > 0 && (
-        <div className="insight-card">
-          <div className="insight-label">Key Insight</div>
-          <div className="insight-text">
-            {topCats[0]
-              ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}`
-              : "Keep uploading statements to unlock insights."}
-          </div>
-        </div>
-      )}
-      
+      <div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>
+      {transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}
       <div className="dashboard-grid">
-        <div className="card">
-          <div className="card-title">Top Categories</div>
-          {topCats.length === 0 ? (
-            <div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>
-          ) : topCats.map(([name, val], i) => {
-            const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[7];
-            const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0;
-            return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>);
-          })}
-        </div>
-        
-        <div className="card">
-          <div className="card-title">💰 Recurring Subscriptions</div>
-          {subscriptions.length === 0 ? (
-            <div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>
-          ) : (
-            <>
-              {subscriptions.map((s, i) => (
-                <div key={i} className="sub-item">
-                  <div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div>
-                  <div><div className="sub-amount">{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div>
-                </div>
-              ))}
-              <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}>
-                <div className="stat-label">Estimated annual subscription spend</div>
-                <div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div>
-              </div>
-            </>
-          )}
-        </div>
+        <div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[7]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div>
+        <div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount">{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div>
       </div>
-      
-      {/* Spending Patterns Section */}
-      <div className="card" style={{ marginTop: 20 }}>
-        <div className="card-title">📈 Spending Patterns</div>
-        
-        {/* Anomaly Detection Card */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div>
-          <div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}>
-            <div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div>
-          </div>
-        </div>
-        
-        {/* Timing Insights Card */}
-        {timing && (
-          <div>
-            <div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div>
-            <div className="timing-bar-chart">
-              {timing.barData.map((day, idx) => (
-                <div key={idx} className="timing-bar-row">
-                  <div className="timing-bar-label">{day.label}</div>
-                  <div className="timing-bar-bg">
-                    <div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>
-                      {day.percent > 20 && formatMoney(day.value, currency)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="whatif-output" style={{ marginTop: 16 }}>
-              <div className="whatif-output-text">
-                You spend most on <strong>{timing.highestDay}</strong>.
-              </div>
-              {timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}
-              {timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}
-            </div>
-          </div>
-        )}
+      <div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div>
+        <div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>
+        {timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}
       </div>
     </div>
   );
@@ -1355,6 +1264,28 @@ export default function SpendSight() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const lastActivityRef = useRef(Date.now());
+  
+  // FEATURE 10: Session timeout tracking
+  useEffect(() => {
+    if (!user) return;
+    const resetTimer = () => {
+      lastActivityRef.current = Date.now();
+      if (sessionExpired) setSessionExpired(false);
+    };
+    const events = ["mousemove", "keydown", "touchstart", "click"];
+    events.forEach(event => document.addEventListener(event, resetTimer));
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > 15 * 60 * 1000 && !sessionExpired) {
+        setSessionExpired(true);
+      }
+    }, 60000);
+    return () => {
+      events.forEach(event => document.removeEventListener(event, resetTimer));
+      clearInterval(interval);
+    };
+  }, [user, sessionExpired]);
 
   useEffect(() => { const html = document.documentElement; if (theme === "dark") html.classList.add("dark"); else if (theme === "light") html.classList.remove("dark"); else { const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches; if (prefersDark) html.classList.add("dark"); else html.classList.remove("dark"); } }, [theme]);
   useEffect(() => { if (theme !== "system") return; const mq = window.matchMedia("(prefers-color-scheme: dark)"); const handler = (e) => { if (e.matches) document.documentElement.classList.add("dark"); else document.documentElement.classList.remove("dark"); }; mq.addEventListener("change", handler); return () => mq.removeEventListener("change", handler); }, [theme]);
@@ -1378,6 +1309,11 @@ export default function SpendSight() {
 
   if (!user) { return (<><style>{css}</style><div className="auth-screen"><div className="auth-card"><div className="auth-logo"><span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span></div><div className="auth-tagline">Your money, your clarity.</div><div className="auth-tabs"><button className={`auth-tab ${authTab === "login" ? "active" : ""}`} onClick={() => setAuthTab("login")}>Sign In</button><button className={`auth-tab ${authTab === "signup" ? "active" : ""}`} onClick={() => setAuthTab("signup")}>Sign Up</button></div>{authTab === "signup" && (<div className="form-group"><label className="form-label">Your Name</label><input className="form-input" placeholder="e.g. El" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>)}<div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" placeholder="you@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div><button className="btn-primary" onClick={handleAuth}>{authTab === "login" ? "Sign In →" : "Create Account →"}</button></div></div>{toast && <div className="toast">{toast}</div>}</>); }
   if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
+  
+  // Session timeout overlay
+  if (sessionExpired) {
+    return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>);
+  }
 
   return (<><style>{css}</style><div className="app"><div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={handleCurrencyChange} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} currency={currency} />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={() => { setTransactions([]); setGoals([]); setImportedFiles([]); setIncomes([]); showToast("All data cleared."); }} currency={currency} onCurrencyChange={handleCurrencyChange} theme={theme} onThemeChange={setTheme} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
 }
