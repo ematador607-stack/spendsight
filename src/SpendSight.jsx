@@ -165,7 +165,136 @@ function parseCSV(csvText) {
   return transactions;
 }
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
+// ─── FINANCIAL HEALTH ENGINE (Batch A) ──────────────────────────────────────
+
+function calculateFinancialHealth(transactions, incomes, goals, budgets) {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  // Get current month's transactions
+  const monthTxs = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+  
+  // Get previous month's transactions
+  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  const prevMonthTxs = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+  });
+  
+  // 1. Savings Rate (30%)
+  const monthlyIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  const creditTransactions = monthTxs.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = monthlyIncome + creditTransactions;
+  const totalSpent = monthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
+  const savings = Math.max(0, totalIncome - totalSpent);
+  const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+  
+  // Score: 20%+ savings = 100, 0% = 0
+  const savingsScore = Math.min(100, (savingsRate / 20) * 100);
+  
+  // 2. Budget Compliance (25%)
+  let budgetScore = 0;
+  if (budgets.length > 0) {
+    const categorySpending = {};
+    monthTxs.filter(t => t.type === "debit").forEach(t => {
+      const cat = t.customCategory || t.category;
+      categorySpending[cat] = (categorySpending[cat] || 0) + t.amount;
+    });
+    
+    let totalBudget = 0;
+    let totalSpentBudgeted = 0;
+    budgets.forEach(b => {
+      const spent = categorySpending[b.category] || 0;
+      totalBudget += b.amount;
+      totalSpentBudgeted += Math.min(spent, b.amount);
+    });
+    
+    budgetScore = totalBudget > 0 ? (totalSpentBudgeted / totalBudget) * 100 : 100;
+    budgetScore = Math.min(100, budgetScore);
+  } else {
+    budgetScore = 50; // No budgets set = neutral
+  }
+  
+  // 3. Spending Stability (20%)
+  const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
+  let stabilityScore = 100;
+  if (prevMonthSpent > 0 && totalSpent > 0) {
+    const variance = Math.abs((totalSpent - prevMonthSpent) / prevMonthSpent);
+    stabilityScore = Math.max(0, 100 - (variance * 100));
+    stabilityScore = Math.min(100, stabilityScore);
+  }
+  
+  // 4. Goal Progress (15%)
+  let goalScore = 0;
+  if (goals.length > 0) {
+    const goalProgress = goals.reduce((sum, g) => {
+      const pct = g.target > 0 ? (g.saved / g.target) * 100 : 0;
+      return sum + Math.min(pct, 100);
+    }, 0);
+    goalScore = goalProgress / goals.length;
+  } else {
+    goalScore = 50; // No goals set = neutral
+  }
+  
+  // 5. Debt Burden (10%) - using credit transactions as proxy
+  const totalCredit = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
+  const debtScore = totalIncome > 0 ? Math.max(0, 100 - (totalCredit / totalIncome) * 100) : 100;
+  
+  // Weighted score
+  const weights = { savings: 0.30, budget: 0.25, stability: 0.20, goals: 0.15, debt: 0.10 };
+  const overallScore = Math.round(
+    savingsScore * weights.savings +
+    budgetScore * weights.budget +
+    stabilityScore * weights.stability +
+    goalScore * weights.goals +
+    debtScore * weights.debt
+  );
+  
+  // Risk Meter
+  const riskFactors = [];
+  if (savingsRate < 10) riskFactors.push("Low savings rate");
+  if (budgetScore < 70) riskFactors.push("Budget overruns");
+  if (stabilityScore < 60) riskFactors.push("Unstable spending");
+  if (debtScore < 50) riskFactors.push("High debt burden");
+  
+  let riskLevel = "green";
+  let riskLabel = "Low Risk";
+  if (riskFactors.length >= 3) { riskLevel = "red"; riskLabel = "High Risk"; }
+  else if (riskFactors.length >= 1) { riskLevel = "yellow"; riskLabel = "Medium Risk"; }
+  
+  // Monthly Grade
+  let grade = "F";
+  if (overallScore >= 95) grade = "A+";
+  else if (overallScore >= 85) grade = "A";
+  else if (overallScore >= 70) grade = "B";
+  else if (overallScore >= 55) grade = "C";
+  else if (overallScore >= 40) grade = "D";
+  
+  return {
+    score: overallScore,
+    grade: grade,
+    savingsRate: Math.round(savingsRate),
+    savingsScore: Math.round(savingsScore),
+    budgetScore: Math.round(budgetScore),
+    stabilityScore: Math.round(stabilityScore),
+    goalScore: Math.round(goalScore),
+    debtScore: Math.round(debtScore),
+    riskLevel: riskLevel,
+    riskLabel: riskLabel,
+    riskFactors: riskFactors,
+    totalIncome: totalIncome,
+    totalSpent: totalSpent,
+    savings: savings,
+    monthOverMonthChange: prevMonthSpent > 0 ? Math.round(((totalSpent - prevMonthSpent) / prevMonthSpent) * 100) : 0
+  };
+}
+
+// ─── STYLES (appended new CSS) ───────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
@@ -185,6 +314,9 @@ const css = `
     --greeting-name: #1A1A2E;
     --card-bg: #FFFFFF;
     --text-scale: 1;
+    --risk-green: #00C896;
+    --risk-yellow: #F6C90E;
+    --risk-red: #FF4757;
   }
 
   html.dark {
@@ -196,6 +328,9 @@ const css = `
     --stat-value: #E2E8F0;
     --greeting-name: #00C896;
     --card-bg: #1A1A2E;
+    --risk-green: #00E0AA;
+    --risk-yellow: #F6C90E;
+    --risk-red: #FF6B7A;
   }
 
   html.text-small { --text-scale: 0.85; }
@@ -318,6 +453,117 @@ const css = `
   .currency-banner-label { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .currency-banner-value { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
   .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
+
+  /* ─── FINANCIAL HEALTH SCORE STYLES ─── */
+  .health-score-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .health-score-main {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .health-score-circle {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: calc(28px * var(--text-scale));
+    color: white;
+    flex-shrink: 0;
+  }
+  .health-score-circle .grade {
+    font-size: calc(14px * var(--text-scale));
+    font-weight: 600;
+    opacity: 0.9;
+  }
+  .health-score-details {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+  }
+  .health-metric {
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: 8px;
+  }
+  .health-metric-label {
+    font-size: calc(10px * var(--text-scale));
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .health-metric-value {
+    font-family: 'Syne', sans-serif;
+    font-size: calc(18px * var(--text-scale));
+    font-weight: 700;
+    color: var(--text);
+  }
+  .health-metric-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .health-metric-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+
+  .risk-meter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .risk-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .risk-dot.green { background: var(--risk-green); }
+  .risk-dot.yellow { background: var(--risk-yellow); }
+  .risk-dot.red { background: var(--risk-red); }
+  .risk-label {
+    font-weight: 600;
+    font-size: calc(13px * var(--text-scale));
+  }
+  .risk-factors {
+    font-size: calc(12px * var(--text-scale));
+    color: var(--muted);
+  }
+
+  .insight-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .insight-mini-card {
+    background: var(--bg);
+    padding: 12px 16px;
+    border-radius: 8px;
+    border-left: 3px solid var(--mint);
+  }
+  .insight-mini-card .icon { font-size: calc(18px * var(--text-scale)); margin-right: 8px; }
+  .insight-mini-card .text { font-size: calc(13px * var(--text-scale)); }
 
   .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
   .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
@@ -569,6 +815,8 @@ const css = `
     .calendar-grid { font-size: calc(10px * var(--text-scale)); }
     .calendar-day { min-height: 60px; }
     .contact-links { flex-direction: column; }
+    .health-score-main { flex-direction: column; text-align: center; }
+    .health-score-details { grid-template-columns: 1fr 1fr; }
   }
 `;
 
@@ -647,6 +895,90 @@ function BarChart({ data }) {
   );
 }
 
+// ─── FINANCIAL HEALTH COMPONENT ─────────────────────────────────────────────
+function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
+  const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
+  
+  const scoreColor = health.score >= 70 ? "var(--mint)" : health.score >= 40 ? "#F6C90E" : "var(--danger)";
+  
+  const getInsights = () => {
+    const insights = [];
+    if (health.savingsRate >= 20) insights.push({ icon: "💰", text: `You saved ${health.savingsRate}% of income this month — Excellent!` });
+    else if (health.savingsRate >= 10) insights.push({ icon: "💪", text: `Savings rate of ${health.savingsRate}% — Keep going!` });
+    else insights.push({ icon: "📈", text: `Try to save at least 10% of income (currently ${health.savingsRate}%)` });
+    
+    if (health.budgetScore >= 90) insights.push({ icon: "✅", text: "All categories within budget — Great discipline!" });
+    else if (health.budgetScore >= 70) insights.push({ icon: "⚠️", text: "Some categories over budget — Review spending" });
+    else insights.push({ icon: "🔴", text: "Multiple categories over budget — Consider adjustments" });
+    
+    if (health.stabilityScore >= 80) insights.push({ icon: "📊", text: "Spending stable — no major fluctuations" });
+    else if (health.stabilityScore >= 50) insights.push({ icon: "📉", text: "Spending fluctuating — review irregular expenses" });
+    else insights.push({ icon: "📊", text: "Significant spending changes — investigate" });
+    
+    if (goals.length > 0) {
+      const onTrack = goals.filter(g => (g.saved / g.target) * 100 >= 50).length;
+      insights.push({ icon: "🎯", text: `${onTrack}/${goals.length} goals on track` });
+    }
+    
+    return insights.slice(0, 4);
+  };
+  
+  const insights = getInsights();
+  
+  return (
+    <div className="health-score-card">
+      <div className="health-score-main">
+        <div className="health-score-circle" style={{ background: scoreColor }}>
+          {health.score}
+          <span className="grade">Grade {health.grade}</span>
+        </div>
+        <div className="health-score-details">
+          <div className="health-metric">
+            <div className="health-metric-label">Savings Rate</div>
+            <div className="health-metric-value">{health.savingsRate}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.savingsScore}%`, background: "var(--mint)" }} /></div>
+          </div>
+          <div className="health-metric">
+            <div className="health-metric-label">Budget</div>
+            <div className="health-metric-value">{health.budgetScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.budgetScore}%`, background: "var(--mint)" }} /></div>
+          </div>
+          <div className="health-metric">
+            <div className="health-metric-label">Stability</div>
+            <div className="health-metric-value">{health.stabilityScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.stabilityScore}%`, background: "var(--mint)" }} /></div>
+          </div>
+          <div className="health-metric">
+            <div className="health-metric-label">Goals</div>
+            <div className="health-metric-value">{health.goalScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.goalScore}%`, background: "var(--mint)" }} /></div>
+          </div>
+        </div>
+      </div>
+      
+      <div className={`risk-meter`}>
+        <div className={`risk-dot ${health.riskLevel}`} />
+        <span className="risk-label">{health.riskLabel}</span>
+        {health.riskFactors.length > 0 && (
+          <span className="risk-factors">• {health.riskFactors.join(" • ")}</span>
+        )}
+        {health.riskFactors.length === 0 && (
+          <span className="risk-factors">• All metrics look good!</span>
+        )}
+      </div>
+      
+      <div className="insight-cards">
+        {insights.map((insight, idx) => (
+          <div key={idx} className="insight-mini-card">
+            <span className="icon">{insight.icon}</span>
+            <span className="text">{insight.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── CONTACT PAGE ─────────────────────────────────────────────────────────────
 function ContactPage() {
   return (
@@ -682,7 +1014,7 @@ function ContactPage() {
   );
 }
 
-// ─── WHAT-IF PAGE (without Scenario C) ────────────────────────────────────────
+// ─── WHAT-IF PAGE ─────────────────────────────────────────────────────────────
 function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddScenario, onDeleteScenario }) {
   const [habitName, setHabitName] = useState("");
   const [habitDays, setHabitDays] = useState(30);
@@ -698,7 +1030,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   
   const categorySpend = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
-    categorySpend[t.category] = (categorySpend[t.category] || 0) + t.amount;
+    const cat = t.customCategory || t.category;
+    categorySpend[cat] = (categorySpend[cat] || 0) + t.amount;
   });
   const monthlyCategorySpend = categorySpend[reduceCategory] || 0;
   
@@ -840,7 +1173,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   
   const tagline = taglines[new Date().getDay() % taglines.length];
   
-  // FIX: Free cash = (incomes + credit transactions) - spending
   const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const creditTransactionsSum = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
   const totalIncome = grossIncome + creditTransactionsSum;
@@ -849,17 +1181,16 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
   const creditedTransactions = transactions.filter(t => t.type === "credit" && t.incomeType);
   
-  // Category spending for budgets
   const categorySpending = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
-    const catName = t.customCategory || t.category;
-    categorySpending[catName] = (categorySpending[catName] || 0) + t.amount;
+    const cat = t.customCategory || t.category;
+    categorySpending[cat] = (categorySpending[cat] || 0) + t.amount;
   });
   
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
-    const catName = t.customCategory || t.category;
-    catMap[catName] = (catMap[catName] || 0) + t.amount;
+    const cat = t.customCategory || t.category;
+    catMap[cat] = (catMap[cat] || 0) + t.amount;
   });
   const chartData = Object.entries(catMap).map(([name, value]) => {
     const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1];
@@ -911,7 +1242,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     setIncomeForm({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
     setShowIncomeModal(false);
     showToast(`💰 Added ${formatMoney(parseFloat(incomeForm.amount), currency)} from ${incomeForm.source}`);
-    showToast(`💵 Free cash updated to ${formatMoney(freeCash + parseFloat(incomeForm.amount), currency)}`);
   };
   
   const handleSaveAllBudgets = () => {
@@ -931,6 +1261,15 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       </div>
       
       <div className="page-header"><div className="greeting">{getGreeting()}, <span className="greeting-name">{user.name} 👋</span></div><div className="greeting-tagline">{tagline}</div></div>
+      
+      {/* ─── FINANCIAL HEALTH SCORE (Batch A) ─── */}
+      <FinancialHealth 
+        transactions={transactions}
+        incomes={incomes}
+        goals={goals}
+        budgets={budgets}
+        currency={currency}
+      />
       
       <div className="income-banner">
         <div className="income-header"><div className="income-title">💰 Income Sources</div><button className="btn-add-income" onClick={() => setShowIncomeModal(true)}>+ Add Income</button></div>
@@ -965,7 +1304,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       <div className="card">
         <div className="card-title">Recent Transactions</div>
         {recent.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions yet</div><div className="empty-sub">Upload a bank statement to see your transactions</div></div>) : (
-          <div className="tx-list">{recent.map((t, i) => { const catName = t.customCategory || t.category; const cat = CATEGORIES.find(c => c.name === catName) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: cat.color + "20" }}>{cat.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{catName}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+          <div className="tx-list">{recent.map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
         )}
       </div>
       
@@ -986,7 +1325,6 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
     description: "", amount: "", date: new Date().toISOString().split("T")[0],
     type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: ""
   });
-  const [tagInput, setTagInput] = useState("");
   const fileRef = useRef();
   
   const handleAddTag = (e, setter, currentTags) => {
@@ -1091,7 +1429,7 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
       ) : (
         <div>
           <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {(preview?.filename || csvPreview?.filename)}</div><p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 16 }}>Found {(preview?.transactions || csvPreview?.transactions).length} transactions. Review and confirm below.</p>
-            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const catName = t.customCategory || t.category; const cat = CATEGORIES.find(c => c.name === catName) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: cat.color + "20" }}>{cat.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{catName}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
           </div>
           <div style={{ display: "flex", gap: 12 }}><button className="btn-cancel" onClick={() => { setPreview(null); setCsvPreview(null); }}>Cancel</button><button className="btn-save" onClick={() => handleConfirmUpload(preview?.transactions || csvPreview?.transactions, preview?.fileKey || csvPreview?.fileKey, preview?.filename || csvPreview?.filename)}>Confirm & Save →</button></div>
         </div>
@@ -1102,7 +1440,7 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
   );
 }
 
-// ─── TRANSACTIONS PAGE (with edit functionality) ──────────────────────────────
+// ─── TRANSACTIONS PAGE ─────────────────────────────────────────────────────
 function TransactionsPage({ transactions, setTransactions, currency, showToast }) {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
@@ -1133,7 +1471,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   );
   filtered = filtered.filter(quickFilters.find(f => f.id === activeFilter)?.filter || (() => true));
   
-  // Undo/Redo functions
   const pushToUndo = (newState) => {
     setUndoStack(prev => [...prev, transactions]);
     setRedoStack([]);
@@ -1157,7 +1494,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
     showToast("Redo successful");
   };
   
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -1171,7 +1507,9 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
-        document.querySelector('.btn-save')?.click();
+        // Navigate to upload page
+        const uploadBtn = document.querySelector('[data-nav="upload"]');
+        if (uploadBtn) uploadBtn.click();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
@@ -1272,7 +1610,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       
       <div className="card">
         {filtered.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions found</div><div className="empty-sub">Try a different search or filter</div></div>) : (
-          <div className="tx-list">{filtered.map((t) => { const catName = t.customCategory || t.category; const cat = CATEGORIES.find(c => c.name === catName) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: cat.color + "20" }}>{cat.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: cat.color + "20", color: cat.color }}>{catName}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
+          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
         )}
       </div>
       
@@ -1292,8 +1630,8 @@ function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
-    const catName = t.customCategory || t.category;
-    catMap[catName] = (catMap[catName] || 0) + t.amount;
+    const cat = t.customCategory || t.category;
+    catMap[cat] = (catMap[cat] || 0) + t.amount;
   });
   const topCats = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 3);
   
@@ -1364,7 +1702,7 @@ function InsightsPage({ transactions, currency }) {
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}<div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount">{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
 }
 
-// ─── GOALS PAGE (with contribution feature) ──────────────────────────────────
+// ─── GOALS PAGE ──────────────────────────────────────────────────────────────
 function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [showContributeModal, setShowContributeModal] = useState(null);
@@ -1388,7 +1726,7 @@ function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   {showContributeModal && (<div className="modal-overlay" onClick={() => setShowContributeModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add to {showContributeModal.name}</div><label className="modal-label">Amount to contribute ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={contributeAmount} onChange={e => setContributeAmount(e.target.value)} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowContributeModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleContribute(showContributeModal.id)}>Contribute</button></div></div></div>)}</div>);
 }
 
-// ─── SETTINGS PAGE (with backup/restore) ─────────────────────────────────────
+// ─── SETTINGS PAGE ───────────────────────────────────────────────────────────
 function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange, textSize, onTextSizeChange, transactions, goals, incomes, budgets, customScenarios, onRestoreData, showToast }) {
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
   const handleCurrencyChange = (newCurrency) => { if (!currencyConfirmShown) { showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`); setCurrencyConfirmShown(true); } onCurrencyChange(newCurrency); };
@@ -1503,13 +1841,11 @@ export default function SpendSight() {
   const handleAddScenario = (scenario) => { setCustomScenarios(s => [...s, scenario]); showToast("Custom scenario added!"); };
   const handleDeleteScenario = (id) => { setCustomScenarios(s => s.filter(sc => sc.id !== id)); showToast("Scenario removed."); };
   
-  // Goal contribution - reduces free cash and registers as transaction
   const handleContributeToGoal = (goalId, amount) => {
     const goal = goals.find(g => g.id === goalId);
     if (!goal) return;
     const newSaved = goal.saved + amount;
     setGoals(goals.map(g => g.id === goalId ? { ...g, saved: newSaved } : g));
-    // Add a transaction for the contribution
     const contributionTx = {
       id: Date.now(),
       date: new Date().toISOString().split("T")[0],
