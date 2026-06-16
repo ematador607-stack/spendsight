@@ -50,6 +50,7 @@ const taglines = [
   "Every pula tells a story.",
 ];
 
+// Updated CATEGORIES with Savings as a default category
 const CATEGORIES = [
   { name: "Groceries",    icon: "🛒", color: "#00C896" },
   { name: "Transport",    icon: "🚗", color: "#4299E1" },
@@ -58,6 +59,7 @@ const CATEGORIES = [
   { name: "Health",       icon: "💊", color: "#FC8181" },
   { name: "Shopping",     icon: "🛍️", color: "#F6C90E" },
   { name: "Food & Dining",icon: "🍽️", color: "#68D391" },
+  { name: "Savings",      icon: "🐷", color: "#F6C90E" },
   { name: "Other",        icon: "📦", color: "#CBD5E0" },
 ];
 
@@ -167,11 +169,11 @@ function parseCSV(csvText) {
 
 // ─── AI SERVICE ──────────────────────────────────────────────────────────────
 
-// NVIDIA DeepSeek API Configuration
+// NVIDIA Llama API Configuration
 const NVIDIA_CONFIG = {
-  apiKey: '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',
+  apiKey: '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',
   baseURL: 'https://integrate.api.nvidia.com/v1',
-  model: 'deepseek-ai/deepseek-v4-flash',
+  model: 'meta/llama-3.3-70b-instruct',
 };
 
 async function callNVIDIA(prompt, systemPrompt = null) {
@@ -191,10 +193,9 @@ async function callNVIDIA(prompt, systemPrompt = null) {
       body: JSON.stringify({
         model: NVIDIA_CONFIG.model,
         messages: messages,
-        temperature: 0.7,
-        top_p: 0.95,
-        max_tokens: 4096,
-        chat_template_kwargs: { thinking: true, reasoning_effort: "high" },
+        temperature: 0.2,
+        top_p: 0.7,
+        max_tokens: 1024,
         stream: false
       })
     });
@@ -202,14 +203,12 @@ async function callNVIDIA(prompt, systemPrompt = null) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('NVIDIA API error:', errorText);
-      // Fallback to mock
       return getMockResponse(prompt);
     }
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
     
-    // Try to parse JSON from the response
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -219,19 +218,15 @@ async function callNVIDIA(prompt, systemPrompt = null) {
       console.warn('Could not parse AI response as JSON, using raw content');
     }
     
-    // If response is plain text, wrap it
     return { raw: content };
     
   } catch (error) {
     console.error('AI service error:', error);
-    // Fallback to mock
     return getMockResponse(prompt);
   }
 }
 
-// Mock responses for when API fails
 function getMockResponse(prompt) {
-  // Parse the prompt to determine what type of response is needed
   if (prompt.includes("financial advisor")) {
     return {
       summary: "Your spending this month is within your income range.",
@@ -540,15 +535,6 @@ const css = `
     position: relative;
     overflow: hidden;
   }
-  .ai-advisor-card::before {
-    content: '🤖';
-    position: absolute;
-    right: 16px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: calc(48px * var(--text-scale));
-    opacity: 0.15;
-  }
   .ai-advisor-header {
     display: flex;
     align-items: center;
@@ -824,10 +810,33 @@ const css = `
   .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: calc(12px * var(--text-scale)); font-weight: 500; cursor: pointer; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
   .filter-chip.active { background: var(--mint); border-color: var(--mint); color: var(--navy-deep); }
 
+  /* Transaction checkbox fixes */
+  .tx-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+    flex-shrink: 0;
+  }
+  .tx-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--mint);
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    appearance: checkbox;
+    -webkit-appearance: checkbox;
+    -moz-appearance: checkbox;
+  }
+  .tx-checkbox input[type="checkbox"]:checked {
+    accent-color: var(--mint);
+    background: var(--mint);
+  }
+
   .tx-list { display: flex; flex-direction: column; }
   .tx-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); position: relative; }
-  .tx-checkbox { margin-top: 10px; flex-shrink: 0; }
-  .tx-checkbox input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--mint); }
   .tx-content { flex: 1; min-width: 0; }
   .tx-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .tx-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: calc(16px * var(--text-scale)); flex-shrink: 0; }
@@ -1087,9 +1096,8 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [showReport, setShowReport] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [report, setReport] = useState(null);
-  const [aiStatus, setAiStatus] = useState("idle"); // idle, loading, success, error
+  const [aiStatus, setAiStatus] = useState("idle");
 
-  // Calculate data for AI
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
@@ -1156,7 +1164,6 @@ Return a JSON object with exactly these keys:
 
       const result = await callNVIDIA(prompt);
       
-      // If we got a raw response, try to parse it
       let parsedResult = result;
       if (result.raw) {
         try {
@@ -1164,7 +1171,6 @@ Return a JSON object with exactly these keys:
           if (jsonMatch) {
             parsedResult = JSON.parse(jsonMatch[0]);
           } else {
-            // Fallback: create structured response from raw
             parsedResult = {
               summary: result.raw.substring(0, 100) + "...",
               opportunity: "Review your spending categories for potential savings.",
@@ -1257,7 +1263,6 @@ Return a JSON object with:
     setReportLoading(false);
   };
   
-  // Auto-generate advice on mount
   useEffect(() => {
     if (transactions.length > 0) {
       generateAdvice();
@@ -1268,11 +1273,10 @@ Return a JSON object with:
     return (
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
-          <span style={{ fontSize: 24 }}>🤖</span>
-          <span className="ai-advisor-badge">AI Advisor</span>
+          <span className="ai-advisor-badge">Your Financial Advisor</span>
         </div>
         <div className="ai-advisor-summary">Upload transactions to get personalized financial advice.</div>
-        <div style={{ fontSize: 14, color: "var(--muted)" }}>Your AI advisor will analyze your spending patterns and suggest improvements.</div>
+        <div style={{ fontSize: 14, color: "var(--muted)" }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
       </div>
     );
   }
@@ -1281,8 +1285,7 @@ Return a JSON object with:
     <div>
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
-          <span style={{ fontSize: 24 }}>🤖</span>
-          <span className="ai-advisor-badge">AI Advisor</span>
+          <span className="ai-advisor-badge">Your Financial Advisor</span>
           <span className="ai-advisor-badge" style={{ 
             background: aiStatus === "success" ? "var(--mint)" : 
                        aiStatus === "loading" ? "#F6C90E" : 
@@ -1295,14 +1298,14 @@ Return a JSON object with:
              aiStatus === "error" ? "✗ Error" : "Ready"}
           </span>
           <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
-            {loading ? "⏳" : "🔄 Refresh"}
+            {loading ? "⏳" : "⟳ Refresh Advice"}
           </button>
         </div>
         
         {loading ? (
           <div className="ai-report-loading">
             <div className="spinner" />
-            <div style={{ marginTop: 12 }}>Analyzing your finances with DeepSeek AI...</div>
+            <div style={{ marginTop: 12 }}>Analyzing your finances...</div>
           </div>
         ) : advice ? (
           <>
@@ -1317,18 +1320,15 @@ Return a JSON object with:
         <button className="btn-outline" onClick={() => setShowReport(!showReport)}>
           📊 {showReport ? "Hide" : "Generate"} Weekly Report
         </button>
-        <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 12 }}>
-          Powered by DeepSeek AI
-        </span>
       </div>
       
       {showReport && (
         <div className="ai-report-card">
-          <div className="card-title">📊 AI Weekly Spending Report</div>
+          <div className="card-title">📊 Weekly Spending Report</div>
           {reportLoading ? (
             <div className="ai-report-loading">
               <div className="spinner" />
-              <div style={{ marginTop: 12 }}>Generating your report with DeepSeek...</div>
+              <div style={{ marginTop: 12 }}>Generating your report...</div>
             </div>
           ) : report ? (
             <div className="ai-report-content">
@@ -1634,7 +1634,12 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const totalIncome = grossIncome + creditTransactionsSum;
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const freeCash = Math.max(0, totalIncome - totalSpent);
+  
+  // Calculate savings progress as percentage
   const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
+  const totalTarget = goals.reduce((s, g) => s + g.target, 0);
+  const savingsProgress = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
+  
   const creditedTransactions = transactions.filter(t => t.type === "credit" && t.incomeType);
   
   const categorySpending = {};
@@ -1743,13 +1748,33 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
           {incomes.length === 0 && (<div className="empty-text" style={{ textAlign: "center", padding: "12px" }}>No income sources added yet. Click + Add Income.</div>)}
           {incomes.map(inc => (<div key={inc.id} className="income-row"><div><span className="income-type-badge">{inc.source}</span>{inc.label && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>— {inc.label}</span>}<div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{inc.date}</div></div><div><span className="income-amount">{formatMoney(inc.amount, currency)}</span><button className="income-delete" onClick={() => onDeleteIncome(inc.id)}>✕</button></div></div>))}
         </div>
-        {creditedTransactions.length > 0 && (<div className="credited-section"><button className="credited-toggle" onClick={() => setShowCreditedBreakdown(!showCreditedBreakdown)}>{showCreditedBreakdown ? "▼" : "▶"} Credited Income ({creditedTransactions.length})</button>{showCreditedBreakdown && (<div className="income-list" style={{ marginTop: 8 }}>{creditedTransactions.map(tx => (<div key={tx.id} className="income-row"><div><span className="income-type-badge">{tx.incomeType || "Other"}</span><span style={{ marginLeft: 8, fontSize: 13 }}>{tx.description}</span><div style={{ fontSize: 11, color: "var(--muted)" }}>{tx.date}</div></div><div className="income-amount">+{formatMoney(tx.amount, currency)}</div></div>))}</div>)}</div>)}
+        {creditedTransactions.length > 0 && (
+          <div className="credited-section">
+            <button className="credited-toggle" onClick={() => setShowCreditedBreakdown(!showCreditedBreakdown)}>
+              {showCreditedBreakdown ? "▼" : "▶"} Credited Income ({creditedTransactions.length})
+            </button>
+            {showCreditedBreakdown && (
+              <div className="income-list" style={{ marginTop: 8 }}>
+                {creditedTransactions.map(tx => (
+                  <div key={tx.id} className="income-row">
+                    <div>
+                      <span className="income-type-badge">{tx.incomeType || "Other"}</span>
+                      <span style={{ marginLeft: 8, fontSize: 13 }}>{tx.description}</span>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{tx.date}</div>
+                    </div>
+                    <div className="income-amount">+{formatMoney(tx.amount, currency)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       <div className="stats-grid">
         <div className="stat-card spent"><div className="stat-label">Total Spent</div><div className="stat-value">{formatMoney(totalSpent, currency)}</div><div className="stat-sub">This month</div></div>
         <div className="stat-card free"><div className="stat-label">Free Cash <small style={{ display: "block", fontSize: 10, marginTop: 2 }}>(money left after expenses)</small></div><div className="stat-value">{formatMoney(freeCash, currency)}</div><div className="stat-sub">Income + Credits - Spending</div></div>
-        <div className="stat-card savings"><div className="stat-label">Savings Progress</div><div className="stat-value">{formatMoney(totalSaved, currency)}</div><div className="stat-sub">Across {goals.length} goal{goals.length !== 1 ? "s" : ""}</div></div>
+        <div className="stat-card savings"><div className="stat-label">Savings Progress</div><div className="stat-value">{savingsProgress}%</div><div className="stat-sub">{formatMoney(totalSaved, currency)} saved of {formatMoney(totalTarget, currency)} target</div></div>
       </div>
       
       <div className="dashboard-grid">
@@ -1775,7 +1800,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       
       {showIncomeModal && (<div className="modal-overlay" onClick={() => setShowIncomeModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Income</div><label className="modal-label">Source Type</label><select className="modal-input" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} style={{ appearance: "auto" }}>{incomeSources.map(s => <option key={s} value={s}>{s}</option>)}</select><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Label (optional)</label><input className="modal-input" placeholder="e.g. Freelance project" value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddIncome}>Add Income</button></div></div></div>)}
       
-      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Set your spending limits for each category</p><div style={{ maxHeight: "60vh", overflowY: "auto" }}>{budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
+      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p><div style={{ maxHeight: "60vh", overflowY: "auto" }}>{budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
     </div>
   );
 }
@@ -1786,6 +1811,9 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
   const [preview, setPreview] = useState(null);
   const [csvPreview, setCsvPreview] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [multipleTransactions, setMultipleTransactions] = useState([
+    { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
+  ]);
   const [addForm, setAddForm] = useState({
     description: "", amount: "", date: new Date().toISOString().split("T")[0],
     type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: ""
@@ -1804,6 +1832,53 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
   };
   
   const removeTag = (tag, currentTags, setter) => setter(currentTags.filter(t => t !== tag));
+  
+  // Handle multiple transactions
+  const addTransactionRow = () => {
+    setMultipleTransactions([
+      ...multipleTransactions,
+      { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
+    ]);
+  };
+  
+  const removeTransactionRow = (id) => {
+    if (multipleTransactions.length <= 1) return;
+    setMultipleTransactions(multipleTransactions.filter(t => t.id !== id));
+  };
+  
+  const updateTransactionRow = (id, field, value) => {
+    setMultipleTransactions(multipleTransactions.map(t => 
+      t.id === id ? { ...t, [field]: value } : t
+    ));
+  };
+  
+  const handleAddMultipleTransactions = () => {
+    const validTx = multipleTransactions.filter(t => t.description && t.amount && t.amount > 0);
+    if (validTx.length === 0) {
+      showToast("Please fill in at least one transaction with description and amount");
+      return;
+    }
+    const newTx = validTx.map(t => ({
+      id: Date.now() + Math.random() * 1000,
+      date: t.date,
+      description: t.description,
+      amount: parseFloat(t.amount),
+      type: t.type,
+      category: t.category === "Other" && t.customCategory ? t.customCategory : t.category,
+      customCategory: t.category === "Other" && t.customCategory ? t.customCategory : "",
+      tags: t.tags || [],
+      notes: t.notes || "",
+      splits: [],
+      incomeType: t.type === "credit" ? "Other" : "",
+      isRecurring: false
+    }));
+    onUpload(newTx, `manual-${Date.now()}`, "Manual Entry");
+    setMultipleTransactions([
+      { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
+    ]);
+    setShowAddModal(false);
+    showToast(`${newTx.length} transactions added!`);
+  };
   
   const handleAddTransaction = () => {
     if (!addForm.description || !addForm.amount || addForm.amount <= 0) return;
@@ -1883,8 +1958,8 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
           </div>
           
           <div className="card" style={{ marginBottom: 24 }}>
-            <div className="card-title">✏️ Add Manual Transaction</div>
-            <button className="btn-save" onClick={() => setShowAddModal(true)} style={{ width: "100%" }}>+ Add Transaction</button>
+            <div className="card-title">✏️ Add Multiple Transactions</div>
+            <button className="btn-save" onClick={() => setShowAddModal(true)} style={{ width: "100%" }}>+ Add Transaction(s)</button>
           </div>
           
           <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { const previewImg = ev.target.result; const shimmerDiv = document.getElementById("scan-shimmer"); if (shimmerDiv) shimmerDiv.style.display = "block"; setTimeout(() => { if (shimmerDiv) shimmerDiv.style.display = "none"; const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30); const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] }; document.getElementById("scan-result").innerHTML = `<div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 12px; object-fit: cover;" /></div><div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div><div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div><div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div><button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>`; document.getElementById("scan-add-btn")?.addEventListener("click", () => { const amount = parseFloat(document.getElementById("scan-amount").value); const description = document.getElementById("scan-merchant").value; const date = document.getElementById("scan-date").value; if (amount && description) { document.getElementById("receipt-input").value = ""; document.getElementById("scan-result").innerHTML = ""; const newTx = [{ id: Date.now(), date, description, amount, type: "debit", category: "Other", customCategory: "", tags: [], notes: "", splits: [], incomeType: "", isRecurring: false }]; handleConfirmUpload(newTx, `receipt-${Date.now()}`, `Receipt-${merchant}`); } }); }, 1500); }; reader.readAsDataURL(file); } }} /><button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button><div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div><div id="scan-result"></div><div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div></div></div>
@@ -1900,7 +1975,33 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
         </div>
       )}
       
-      {showAddModal && (<div className="modal-overlay" onClick={() => setShowAddModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Add Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="e.g. Coffee shop" value={addForm.description} onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))} /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={addForm.amount} onChange={e => setAddForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={addForm.date} onChange={e => setAddForm(f => ({ ...f, date: e.target.value }))} /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${addForm.type === "debit" ? "active" : ""}`} onClick={() => setAddForm(f => ({ ...f, type: "debit", incomeType: "" }))}>Debit</button><button className={`auth-tab ${addForm.type === "credit" ? "active" : ""}`} onClick={() => setAddForm(f => ({ ...f, type: "credit" }))}>Credit</button></div>{addForm.type === "credit" && (<><label className="modal-label">Income Type</label><select className="modal-input" value={addForm.incomeType} onChange={e => setAddForm(f => ({ ...f, incomeType: e.target.value }))} style={{ appearance: "auto" }}><option value="">Select...</option><option value="Salary">Salary</option><option value="Gift">Gift</option><option value="Allowance">Allowance</option><option value="Business">Business</option><option value="Other">Other</option></select></>)}<label className="modal-label">Category</label><div className="category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${addForm.category === cat.name ? "active" : ""}`} onClick={() => setAddForm(f => ({ ...f, category: cat.name }))}><span>{cat.icon}</span> {cat.name}</button>))}</div>{addForm.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift, Subscription" value={addForm.customCategory} onChange={e => setAddForm(f => ({ ...f, customCategory: e.target.value }))} /></>)}<label className="modal-label">Tags</label><div className="tags-input">{addForm.tags.map(tag => (<span key={tag} className="tag-chip">{tag}<button onClick={() => removeTag(tag, addForm.tags, (newTags) => setAddForm(f => ({ ...f, tags: newTags })))}>✕</button></span>))}<input className="tags-input-field" placeholder="Type tag and press Enter" onKeyDown={(e) => handleAddTag(e, (newTags) => setAddForm(f => ({ ...f, tags: newTags })), addForm.tags)} /></div><label className="modal-label">Notes</label><textarea className="modal-input" rows="3" placeholder="Optional notes..." value={addForm.notes} onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowAddModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddTransaction}>Save</button></div></div></div>)}
+      {/* Multiple Transactions Modal */}
+      {showAddModal && (<div className="modal-overlay" onClick={() => setShowAddModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700, maxHeight: "80vh", overflowY: "auto" }}><div className="modal-title">Add Multiple Transactions</div>
+        <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Add multiple transactions at once. All fields are editable.</p>
+        {multipleTransactions.map((tx, idx) => (
+          <div key={tx.id} style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 12, border: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Transaction {idx + 1}</span>
+              {multipleTransactions.length > 1 && (
+                <button className="btn-cancel" style={{ padding: "2px 12px", fontSize: 12 }} onClick={() => removeTransactionRow(tx.id)}>✕ Remove</button>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Description</label><input className="modal-input" placeholder="Description" value={tx.description} onChange={e => updateTransactionRow(tx.id, "description", e.target.value)} /></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={tx.amount} onChange={e => updateTransactionRow(tx.id, "amount", e.target.value)} /></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Date</label><input className="modal-input" type="date" value={tx.date} onChange={e => updateTransactionRow(tx.id, "date", e.target.value)} /></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Type</label><div style={{ display: "flex", gap: 4 }}><button className={`auth-tab ${tx.type === "debit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "debit")}>Debit</button><button className={`auth-tab ${tx.type === "credit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "credit")}>Credit</button></div></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Category</label><select className="modal-input" value={tx.category} onChange={e => updateTransactionRow(tx.id, "category", e.target.value)} style={{ fontSize: 13 }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
+              {tx.category === "Other" && (
+                <div><label className="modal-label" style={{ marginTop: 0 }}>Custom Category</label><input className="modal-input" placeholder="e.g., Fuel, Gift" value={tx.customCategory} onChange={e => updateTransactionRow(tx.id, "customCategory", e.target.value)} /></div>
+              )}
+              <div style={{ gridColumn: "1/-1" }}><label className="modal-label" style={{ marginTop: 0 }}>Notes</label><input className="modal-input" placeholder="Optional notes" value={tx.notes} onChange={e => updateTransactionRow(tx.id, "notes", e.target.value)} /></div>
+            </div>
+          </div>
+        ))}
+        <button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={addTransactionRow}>+ Add Another Transaction</button>
+        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowAddModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddMultipleTransactions}>Save All ({multipleTransactions.filter(t => t.description && t.amount).length} valid)</button></div>
+      </div></div>)}
     </div>
   );
 }
@@ -1920,8 +2021,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   const [selectedTxIds, setSelectedTxIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ description: "", amount: "", category: "Other" }]);
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
   
   const quickFilters = [
     { id: "all", label: "All", filter: () => true },
@@ -1938,50 +2037,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
     getTxTags(t).some(tag => tag.toLowerCase().includes(search.toLowerCase()))
   );
   filtered = filtered.filter(quickFilters.find(f => f.id === activeFilter)?.filter || (() => true));
-  
-  const pushToUndo = (newState) => {
-    setUndoStack(prev => [...prev, transactions]);
-    setRedoStack([]);
-  };
-  
-  const handleUndo = () => {
-    if (undoStack.length === 0) return;
-    const lastState = undoStack[undoStack.length - 1];
-    setRedoStack(prev => [...prev, transactions]);
-    setTransactions(lastState);
-    setUndoStack(prev => prev.slice(0, -1));
-    showToast("Undo successful");
-  };
-  
-  const handleRedo = () => {
-    if (redoStack.length === 0) return;
-    const nextState = redoStack[redoStack.length - 1];
-    setUndoStack(prev => [...prev, transactions]);
-    setTransactions(nextState);
-    setRedoStack(prev => prev.slice(0, -1));
-    showToast("Redo successful");
-  };
-  
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) handleRedo();
-        else handleUndo();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        document.querySelector('.search-bar')?.focus();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
-        e.preventDefault();
-        const uploadBtn = document.querySelector('[data-nav="upload"]');
-        if (uploadBtn) uploadBtn.click();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [undoStack, redoStack]);
   
   const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
   const getMonthTransactions = () => {
@@ -2003,14 +2058,12 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   };
   
   const handleUpdateNotesTags = (txId, notes, tags) => {
-    pushToUndo(transactions);
     setTransactions(transactions.map(tx => tx.id === txId ? { ...tx, notes, tags } : tx));
     setShowNoteModal(null);
     showToast("Updated");
   };
   
   const handleEditTransaction = (txId, updatedTx) => {
-    pushToUndo(transactions);
     setTransactions(transactions.map(tx => tx.id === txId ? updatedTx : tx));
     setShowEditModal(null);
     showToast("Transaction updated");
@@ -2022,7 +2075,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       showToast(`Split total (${formatMoney(totalSplit, currency)}) does not match transaction amount (${formatMoney(tx.amount, currency)})`);
       return;
     }
-    pushToUndo(transactions);
     setTransactions(transactions.map(t => t.id === tx.id ? { ...t, splits: splitLines, notes: t.notes || "Split transaction" } : t));
     setShowSplitModal(null);
     setSplitLines([{ description: "", amount: "", category: "Other" }]);
@@ -2030,7 +2082,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   };
   
   const handleBulkRecategorise = (newCategory) => {
-    pushToUndo(transactions);
     setTransactions(transactions.map(tx => selectedTxIds.has(tx.id) ? { ...tx, category: newCategory } : tx));
     setSelectedTxIds(new Set());
     setBulkMode(false);
@@ -2039,7 +2090,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   
   const handleBulkDelete = () => {
     if (window.confirm(`Delete ${selectedTxIds.size} transactions?`)) {
-      pushToUndo(transactions);
       setTransactions(transactions.filter(tx => !selectedTxIds.has(tx.id)));
       setSelectedTxIds(new Set());
       setBulkMode(false);
@@ -2068,7 +2118,6 @@ Provide a short, useful explanation of what this transaction represents in their
       
       const result = await callNVIDIA(prompt);
       let explanation = result.raw || JSON.stringify(result);
-      // Clean up the response
       explanation = explanation.replace(/\{[\s\S]*\}/, '').trim() || explanation;
       if (explanation.length > 500) explanation = explanation.substring(0, 500) + "...";
       setExplanationText(explanation || "This transaction appears to be a standard purchase. No specific insights available.");
@@ -2079,6 +2128,14 @@ Provide a short, useful explanation of what this transaction represents in their
     setExplanationLoading(false);
   };
   
+  const selectAll = () => {
+    if (selectedTxIds.size === filtered.length) {
+      setSelectedTxIds(new Set());
+    } else {
+      setSelectedTxIds(new Set(filtered.map(t => t.id)));
+    }
+  };
+  
   return (
     <div>
       <div className="page-header">
@@ -2086,15 +2143,15 @@ Provide a short, useful explanation of what this transaction represents in their
         <div className="greeting-tagline" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <span>{transactions.length} transaction{transactions.length !== 1 ? "s" : ""} recorded</span>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn-outline" onClick={handleUndo} style={{ padding: "6px 12px", fontSize: 12 }} title="Ctrl+Z">↩️ Undo</button>
-            <button className="btn-outline" onClick={handleRedo} style={{ padding: "6px 12px", fontSize: 12 }} title="Ctrl+Shift+Z">↪️ Redo</button>
             <button className="btn-outline" onClick={() => setShowCalendar(!showCalendar)} style={{ padding: "6px 12px", fontSize: 12 }}>{showCalendar ? "Hide Calendar" : "📅 Calendar View"}</button>
-            <button className="btn-outline" onClick={() => setBulkMode(!bulkMode)} style={{ padding: "6px 12px", fontSize: 12 }}>{bulkMode ? "Exit Select" : "Select"}</button>
+            <button className="btn-outline" onClick={() => setBulkMode(!bulkMode)} style={{ padding: "6px 12px", fontSize: 12 }}>
+              {bulkMode ? "Exit Select" : "Select Transaction(s)"}
+            </button>
           </div>
         </div>
       </div>
       
-      <div className="search-wrap"><span className="search-icon">🔍</span><input className="search-bar" placeholder="Search by name, category, or tag... (Ctrl+K)" value={search} onChange={e => setSearch(e.target.value)} /></div>
+      <div className="search-wrap"><span className="search-icon">🔍</span><input className="search-bar" placeholder="Search by name, category, or tag..." value={search} onChange={e => setSearch(e.target.value)} /></div>
       
       <div className="filter-chips">{quickFilters.map(f => (<button key={f.id} className={`filter-chip ${activeFilter === f.id ? "active" : ""}`} onClick={() => setActiveFilter(f.id)}>{f.label}</button>))}</div>
       
@@ -2106,6 +2163,14 @@ Provide a short, useful explanation of what this transaction represents in their
         )}
       </div>
       
+      {bulkMode && (
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn-outline" style={{ fontSize: 12 }} onClick={selectAll}>
+            {selectedTxIds.size === filtered.length ? "Deselect All" : "Select All"}
+          </button>
+        </div>
+      )}
+      
       {bulkMode && selectedTxIds.size > 0 && (<div className="bulk-bar"><span className="selected-count">{selectedTxIds.size} selected</span><div className="bulk-actions"><button className="bulk-recategorise" onClick={() => { const cat = prompt("Enter new category name"); if (cat && CATEGORIES.some(c => c.name === cat)) handleBulkRecategorise(cat); else if (cat) showToast("Category not found"); }}>Recategorise</button><button className="bulk-delete" onClick={handleBulkDelete}>Delete</button><button className="bulk-cancel" onClick={() => { setBulkMode(false); setSelectedTxIds(new Set()); }}>Cancel</button></div></div>)}
       
       {showNoteModal && (<div className="modal-overlay" onClick={() => setShowNoteModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Note & Tags</div><label className="modal-label">Notes</label><textarea className="modal-input" rows="3" placeholder="Add a note..." defaultValue={showNoteModal.notes} onChange={e => showNoteModal.notes = e.target.value} /><label className="modal-label">Tags</label><div className="tags-input" id="note-tags-container">{showNoteModal.tags.map(tag => (<span key={tag} className="tag-chip">{tag}<button onClick={() => { showNoteModal.tags = showNoteModal.tags.filter(t => t !== tag); document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join(""); }}>✕</button></span>))}<input className="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input" onKeyDown={(e) => { if (e.key === "Enter" || e.key === "," || e.key === " ") { e.preventDefault(); const val = e.target.value.trim(); if (val && !showNoteModal.tags.includes(val)) { showNoteModal.tags.push(val); e.target.value = ""; document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join("") + '<input class="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input">'; const newInput = document.getElementById("note-tag-input"); if (newInput) newInput.focus(); } } }} /></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowNoteModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const notes = document.querySelector(".modal textarea").value; const tagChips = document.querySelectorAll("#note-tags-container .tag-chip"); const tags = Array.from(tagChips).map(chip => chip.childNodes[0].textContent); handleUpdateNotesTags(showNoteModal.txId, notes, tags); }}>Save</button></div></div></div>)}
@@ -2114,7 +2179,7 @@ Provide a short, useful explanation of what this transaction represents in their
       
       {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
       
-      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing with DeepSeek AI...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
+      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing transaction...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
     </div>
   );
 }
@@ -2122,6 +2187,8 @@ Provide a short, useful explanation of what this transaction represents in their
 // ─── INSIGHTS PAGE ───────────────────────────────────────────────────────────
 function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
+  const totalCredit = transactions.filter(t => t.type === "credit").reduce((s, t) => s + t.amount, 0);
+  const savings = totalCredit - totalSpent;
   const catMap = {};
   transactions.filter(t => t.type === "debit").forEach(t => {
     const cat = t.customCategory || t.category;
@@ -2193,7 +2260,22 @@ function InsightsPage({ transactions, currency }) {
   const anomaly = detectAnomaly();
   const timing = getTimingInsights();
   
-  return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}<div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount">{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
+  return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}
+  
+  {/* Savings insight */}
+  {transactions.length > 0 && (
+    <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, #00C89620, #1A1A2E)" : "linear-gradient(135deg, #FF475720, #1A1A2E)" }}>
+      <div className="insight-label">{savings > 0 ? "💰 Savings" : "📊 Spending"}</div>
+      <div className="insight-text">
+        {savings > 0 
+          ? `You've saved ${formatMoney(savings, currency)} this period. At this rate, you'd save ${formatMoney(savings * 12, currency)} in a year! 🎉`
+          : `Your spending (${formatMoney(totalSpent, currency)}) exceeds your income (${formatMoney(totalCredit, currency)}). Consider reviewing your expenses.`
+        }
+      </div>
+    </div>
+  )}
+  
+  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
 }
 
 // ─── GOALS PAGE ──────────────────────────────────────────────────────────────
