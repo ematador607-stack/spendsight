@@ -165,20 +165,110 @@ function parseCSV(csvText) {
   return transactions;
 }
 
-// ─── FINANCIAL HEALTH ENGINE (Batch A) ──────────────────────────────────────
+// ─── AI SERVICE (Batch B) ────────────────────────────────────────────────────
+
+// Mock AI responses for development
+const mockAIResponses = {
+  advisor: (data) => {
+    const savingsRate = data.savingsRate || 0;
+    const topCategory = data.topCategory || "Groceries";
+    const topAmount = data.topAmount || 0;
+    const overBudget = data.overBudget || [];
+    
+    let summary = `Your spending this month is ${data.totalSpent > data.totalIncome ? "exceeding" : "within"} your income.`;
+    let opportunity = "";
+    let encouragement = "";
+    
+    if (savingsRate < 10) {
+      opportunity = `Consider reducing ${topCategory} spending by 10% to save approximately ${formatMoney(topAmount * 0.1, data.currency)} monthly.`;
+      encouragement = "Small changes add up! Start with one category this week.";
+    } else if (savingsRate < 20) {
+      opportunity = `You're saving ${savingsRate}% of your income. Try increasing by 5% to accelerate your goals.`;
+      encouragement = "You're on the right track! Keep building that savings habit.";
+    } else {
+      opportunity = `Excellent savings rate of ${savingsRate}%. Consider investing your surplus for long-term growth.`;
+      encouragement = "You're a saving superstar! Your future self will thank you.";
+    }
+    
+    if (overBudget.length > 0) {
+      opportunity += ` Review ${overBudget.join(", ")} to stay within budget.`;
+    }
+    
+    return { summary, opportunity, encouragement };
+  },
+  
+  weeklyReport: (data) => {
+    const topCategory = data.topCategory || "Groceries";
+    const trend = data.trend || "stable";
+    const recommendations = [
+      `Reduce ${topCategory} spending by scheduling one meatless day per week.`,
+      `Set up automatic transfers to your savings account on payday.`,
+      `Review your subscriptions — you might have unused services.`
+    ];
+    return {
+      topCategory,
+      trend,
+      recommendations: recommendations.slice(0, 2),
+      assessment: trend === "up" ? "Your spending is increasing — time to review." : "Your spending is stable — good job!"
+    };
+  },
+  
+  transactionExplanation: (data) => {
+    const desc = data.description || "Unknown merchant";
+    const amount = data.amount || 0;
+    const category = data.category || "Other";
+    
+    let explanation = `This transaction at ${desc} for ${formatMoney(amount, data.currency)} appears to be a ${category.toLowerCase()} purchase.`;
+    
+    if (category === "Groceries") {
+      explanation += " It's part of your essential spending. Consider meal planning to optimize your grocery budget.";
+    } else if (category === "Entertainment") {
+      explanation += " This is discretionary spending. Track it to ensure it stays within your entertainment budget.";
+    } else if (category === "Bills") {
+      explanation += " This is a recurring expense. Ensure you have budgeted for it monthly.";
+    }
+    
+    return explanation;
+  }
+};
+
+// Real AI service with NVIDIA endpoint
+async function callAIService(prompt, endpoint = null) {
+  // Return mock data if no endpoint provided
+  if (!endpoint) {
+    return mockAIResponses;
+  }
+  
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt })
+    });
+    
+    if (!response.ok) throw new Error('AI service error');
+    return await response.json();
+  } catch (error) {
+    console.error('AI service error:', error);
+    // Fallback to mock responses
+    return mockAIResponses;
+  }
+}
+
+// ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────
 
 function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
   
-  // Get current month's transactions
   const monthTxs = transactions.filter(t => {
     const d = new Date(t.date);
     return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
   });
   
-  // Get previous month's transactions
   const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
   const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
   const prevMonthTxs = transactions.filter(t => {
@@ -186,7 +276,6 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
   });
   
-  // 1. Savings Rate (30%)
   const monthlyIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const creditTransactions = monthTxs.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
   const totalIncome = monthlyIncome + creditTransactions;
@@ -194,10 +283,8 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   const savings = Math.max(0, totalIncome - totalSpent);
   const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
   
-  // Score: 20%+ savings = 100, 0% = 0
   const savingsScore = Math.min(100, (savingsRate / 20) * 100);
   
-  // 2. Budget Compliance (25%)
   let budgetScore = 0;
   if (budgets.length > 0) {
     const categorySpending = {};
@@ -217,10 +304,9 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     budgetScore = totalBudget > 0 ? (totalSpentBudgeted / totalBudget) * 100 : 100;
     budgetScore = Math.min(100, budgetScore);
   } else {
-    budgetScore = 50; // No budgets set = neutral
+    budgetScore = 50;
   }
   
-  // 3. Spending Stability (20%)
   const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
   let stabilityScore = 100;
   if (prevMonthSpent > 0 && totalSpent > 0) {
@@ -229,7 +315,6 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     stabilityScore = Math.min(100, stabilityScore);
   }
   
-  // 4. Goal Progress (15%)
   let goalScore = 0;
   if (goals.length > 0) {
     const goalProgress = goals.reduce((sum, g) => {
@@ -238,14 +323,12 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     }, 0);
     goalScore = goalProgress / goals.length;
   } else {
-    goalScore = 50; // No goals set = neutral
+    goalScore = 50;
   }
   
-  // 5. Debt Burden (10%) - using credit transactions as proxy
   const totalCredit = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
   const debtScore = totalIncome > 0 ? Math.max(0, 100 - (totalCredit / totalIncome) * 100) : 100;
   
-  // Weighted score
   const weights = { savings: 0.30, budget: 0.25, stability: 0.20, goals: 0.15, debt: 0.10 };
   const overallScore = Math.round(
     savingsScore * weights.savings +
@@ -255,7 +338,6 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     debtScore * weights.debt
   );
   
-  // Risk Meter
   const riskFactors = [];
   if (savingsRate < 10) riskFactors.push("Low savings rate");
   if (budgetScore < 70) riskFactors.push("Budget overruns");
@@ -267,7 +349,6 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   if (riskFactors.length >= 3) { riskLevel = "red"; riskLabel = "High Risk"; }
   else if (riskFactors.length >= 1) { riskLevel = "yellow"; riskLabel = "Medium Risk"; }
   
-  // Monthly Grade
   let grade = "F";
   if (overallScore >= 95) grade = "A+";
   else if (overallScore >= 85) grade = "A";
@@ -294,7 +375,7 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   };
 }
 
-// ─── STYLES (appended new CSS) ───────────────────────────────────────────────
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
@@ -453,6 +534,118 @@ const css = `
   .currency-banner-label { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .currency-banner-value { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
   .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
+
+  /* ─── AI ADVISOR STYLES ─── */
+  .ai-advisor-card {
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .ai-advisor-card::before {
+    content: '🤖';
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: calc(48px * var(--text-scale));
+    opacity: 0.15;
+  }
+  .ai-advisor-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .ai-advisor-badge {
+    background: var(--mint);
+    color: var(--navy-deep);
+    padding: 2px 12px;
+    border-radius: 20px;
+    font-size: calc(10px * var(--text-scale));
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .ai-advisor-summary {
+    font-size: calc(16px * var(--text-scale));
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .ai-advisor-opportunity {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .ai-advisor-encouragement {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--mint);
+    font-weight: 500;
+  }
+  .ai-advisor-refresh {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: calc(12px * var(--text-scale));
+    padding: 4px 12px;
+    border-radius: 8px;
+  }
+  .ai-advisor-refresh:hover { background: var(--bg); }
+
+  /* ─── AI REPORT STYLES ─── */
+  .ai-report-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    margin-top: 20px;
+  }
+  .ai-report-content {
+    white-space: pre-wrap;
+    font-size: calc(14px * var(--text-scale));
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .ai-report-loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+  }
+  .ai-report-loading .spinner {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--border);
+    border-top: 3px solid var(--mint);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  /* ─── TRANSACTION EXPLANATION MODAL ─── */
+  .tx-explanation {
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 8px;
+    border-left: 3px solid var(--mint);
+  }
+  .tx-explanation-text {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .tx-explanation-label {
+    font-size: calc(11px * var(--text-scale));
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
 
   /* ─── FINANCIAL HEALTH SCORE STYLES ─── */
   .health-score-card {
@@ -895,6 +1088,194 @@ function BarChart({ data }) {
   );
 }
 
+// ─── AI ADVISOR COMPONENT ──────────────────────────────────────────────────
+function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
+  const [loading, setLoading] = useState(false);
+  const [advice, setAdvice] = useState(null);
+  const [showReport, setShowReport] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [report, setReport] = useState(null);
+  const [aiEndpoint, setAiEndpoint] = useState(localStorage.getItem("ss_ai_endpoint") || "");
+
+  // Calculate data for AI
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  const monthTxs = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+  
+  const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  const creditTransactions = monthTxs.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = grossIncome + creditTransactions;
+  const totalSpent = monthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
+  const savingsRate = totalIncome > 0 ? ((totalIncome - totalSpent) / totalIncome) * 100 : 0;
+  
+  const catMap = {};
+  monthTxs.filter(t => t.type === "debit").forEach(t => {
+    const cat = t.customCategory || t.category;
+    catMap[cat] = (catMap[cat] || 0) + t.amount;
+  });
+  const topCat = Object.entries(catMap).sort((a, b) => b[1] - a[1])[0];
+  
+  const categorySpending = {};
+  monthTxs.filter(t => t.type === "debit").forEach(t => {
+    const cat = t.customCategory || t.category;
+    categorySpending[cat] = (categorySpending[cat] || 0) + t.amount;
+  });
+  const overBudget = budgets.filter(b => {
+    const spent = categorySpending[b.category] || 0;
+    return spent > b.amount;
+  }).map(b => b.category);
+  
+  const generateAdvice = async () => {
+    setLoading(true);
+    try {
+      const data = {
+        totalIncome,
+        totalSpent,
+        savingsRate,
+        topCategory: topCat ? topCat[0] : "None",
+        topAmount: topCat ? topCat[1] : 0,
+        overBudget,
+        currency,
+        transactionCount: monthTxs.length
+      };
+      
+      // Use mock data for now
+      const mockResponse = mockAIResponses.advisor(data);
+      setAdvice(mockResponse);
+    } catch (error) {
+      console.error('AI advisor error:', error);
+      setAdvice({
+        summary: "We're having trouble generating advice right now. Please try again later.",
+        opportunity: "In the meantime, review your top spending categories.",
+        encouragement: "Every small step counts toward financial freedom!"
+      });
+    }
+    setLoading(false);
+  };
+  
+  const generateReport = async () => {
+    setReportLoading(true);
+    setShowReport(true);
+    try {
+      const data = {
+        totalIncome,
+        totalSpent,
+        savingsRate,
+        topCategory: topCat ? topCat[0] : "None",
+        trend: totalSpent > (prevMonthSpent || 0) ? "up" : "down",
+        currency
+      };
+      
+      const mockResponse = mockAIResponses.weeklyReport(data);
+      setReport(mockResponse);
+    } catch (error) {
+      setReport({
+        topCategory: "Unable to analyze",
+        trend: "unknown",
+        recommendations: ["Please try again later"],
+        assessment: "We're having trouble generating your report."
+      });
+    }
+    setReportLoading(false);
+  };
+  
+  // Get previous month spend for trend
+  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  const prevMonthSpent = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === prevMonth && d.getFullYear() === prevYear && t.type === "debit";
+  }).reduce((sum, t) => sum + t.amount, 0);
+  
+  // Auto-generate advice on mount
+  useEffect(() => {
+    if (transactions.length > 0) {
+      generateAdvice();
+    }
+  }, [transactions.length]);
+  
+  if (transactions.length === 0) {
+    return (
+      <div className="ai-advisor-card">
+        <div className="ai-advisor-header">
+          <span style={{ fontSize: 24 }}>🤖</span>
+          <span className="ai-advisor-badge">AI Advisor</span>
+        </div>
+        <div className="ai-advisor-summary">Upload transactions to get personalized financial advice.</div>
+        <div style={{ fontSize: 14, color: "var(--muted)" }}>Your AI advisor will analyze your spending patterns and suggest improvements.</div>
+      </div>
+    );
+  }
+  
+  return (
+    <div>
+      <div className="ai-advisor-card">
+        <div className="ai-advisor-header">
+          <span style={{ fontSize: 24 }}>🤖</span>
+          <span className="ai-advisor-badge">AI Advisor</span>
+          <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
+            {loading ? "⏳" : "🔄 Refresh"}
+          </button>
+        </div>
+        
+        {loading ? (
+          <div className="ai-report-loading">
+            <div className="spinner" />
+            <div style={{ marginTop: 12 }}>Analyzing your finances...</div>
+          </div>
+        ) : advice ? (
+          <>
+            <div className="ai-advisor-summary">💡 {advice.summary}</div>
+            <div className="ai-advisor-opportunity">📌 {advice.opportunity}</div>
+            <div className="ai-advisor-encouragement">🌟 {advice.encouragement}</div>
+          </>
+        ) : null}
+      </div>
+      
+      {/* Weekly Report Button */}
+      <div style={{ marginBottom: 24 }}>
+        <button className="btn-outline" onClick={() => setShowReport(!showReport)}>
+          📊 {showReport ? "Hide" : "Generate"} Weekly Report
+        </button>
+        <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 12 }}>
+          AI-powered spending analysis
+        </span>
+      </div>
+      
+      {showReport && (
+        <div className="ai-report-card">
+          <div className="card-title">📊 AI Weekly Spending Report</div>
+          {reportLoading ? (
+            <div className="ai-report-loading">
+              <div className="spinner" />
+              <div style={{ marginTop: 12 }}>Generating your report...</div>
+            </div>
+          ) : report ? (
+            <div className="ai-report-content">
+              <p><strong>Top Category:</strong> {report.topCategory}</p>
+              <p><strong>Spending Trend:</strong> {report.trend === "up" ? "📈 Increasing" : "📉 Decreasing"}</p>
+              <p><strong>Assessment:</strong> {report.assessment}</p>
+              <div style={{ marginTop: 12 }}>
+                <strong>Recommendations:</strong>
+                <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+                  {report.recommendations.map((rec, i) => (
+                    <li key={i} style={{ marginBottom: 4 }}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── FINANCIAL HEALTH COMPONENT ─────────────────────────────────────────────
 function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
@@ -1262,7 +1643,16 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       
       <div className="page-header"><div className="greeting">{getGreeting()}, <span className="greeting-name">{user.name} 👋</span></div><div className="greeting-tagline">{tagline}</div></div>
       
-      {/* ─── FINANCIAL HEALTH SCORE (Batch A) ─── */}
+      {/* ─── AI ADVISOR (Batch B) ─── */}
+      <AIAdvisor 
+        transactions={transactions}
+        incomes={incomes}
+        goals={goals}
+        budgets={budgets}
+        currency={currency}
+      />
+      
+      {/* ─── FINANCIAL HEALTH SCORE ─── */}
       <FinancialHealth 
         transactions={transactions}
         incomes={incomes}
@@ -1448,6 +1838,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   const [showNoteModal, setShowNoteModal] = useState(null);
   const [showSplitModal, setShowSplitModal] = useState(null);
   const [showEditModal, setShowEditModal] = useState(null);
+  const [showExplanation, setShowExplanation] = useState(null);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedTxIds, setSelectedTxIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -1507,7 +1898,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
-        // Navigate to upload page
         const uploadBtn = document.querySelector('[data-nav="upload"]');
         if (uploadBtn) uploadBtn.click();
       }
@@ -1587,6 +1977,14 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
     setSelectedTxIds(newSet);
   };
   
+  const getExplanation = (tx) => {
+    const mockResponse = mockAIResponses.transactionExplanation({
+      ...tx,
+      currency
+    });
+    return mockResponse;
+  };
+  
   return (
     <div>
       <div className="page-header">
@@ -1610,7 +2008,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       
       <div className="card">
         {filtered.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions found</div><div className="empty-sub">Try a different search or filter</div></div>) : (
-          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
+          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
         )}
       </div>
       
@@ -1621,6 +2019,8 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       {showSplitModal && (<div className="modal-overlay" onClick={() => setShowSplitModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 550 }}><div className="modal-title">Split Transaction</div><div style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 16 }}><div>Original: {showSplitModal.description}</div><div style={{ fontWeight: 700 }}>Amount: {formatMoney(showSplitModal.amount, currency)}</div></div>{splitLines.map((line, idx) => (<div key={idx} className="split-line"><div className="split-header"><span className="split-title">Split {idx + 1}</span>{splitLines.length > 1 && <button className="split-remove" onClick={() => setSplitLines(splitLines.filter((_, i) => i !== idx))}>✕</button>}</div><div className="split-fields"><input placeholder="Description" value={line.description} onChange={e => { const newLines = [...splitLines]; newLines[idx].description = e.target.value; setSplitLines(newLines); }} /><input type="number" step="0.01" placeholder="Amount" value={line.amount} onChange={e => { const newLines = [...splitLines]; newLines[idx].amount = e.target.value; setSplitLines(newLines); }} /><select value={line.category} onChange={e => { const newLines = [...splitLines]; newLines[idx].category = e.target.value; setSplitLines(newLines); }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div></div>))}<button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={() => setSplitLines([...splitLines, { description: "", amount: "", category: "Other" }])}>+ Add Split Line</button><div className="split-total"><span>Total allocated:</span><span>{formatMoney(splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="split-total"><span>Unallocated:</span><span className="split-remainder">{formatMoney(showSplitModal.amount - splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSplitModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleSaveSplit(showSplitModal)}>Save Split</button></div></div></div>)}
       
       {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
+      
+      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div><div className="tx-explanation-text">{getExplanation(showExplanation)}</div></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
     </div>
   );
 }
