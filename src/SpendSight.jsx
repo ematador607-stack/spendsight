@@ -165,96 +165,92 @@ function parseCSV(csvText) {
   return transactions;
 }
 
-// ─── AI SERVICE (Batch B) ────────────────────────────────────────────────────
+// ─── AI SERVICE ──────────────────────────────────────────────────────────────
 
-// Mock AI responses for development
-const mockAIResponses = {
-  advisor: (data) => {
-    const savingsRate = data.savingsRate || 0;
-    const topCategory = data.topCategory || "Groceries";
-    const topAmount = data.topAmount || 0;
-    const overBudget = data.overBudget || [];
-    
-    let summary = `Your spending this month is ${data.totalSpent > data.totalIncome ? "exceeding" : "within"} your income.`;
-    let opportunity = "";
-    let encouragement = "";
-    
-    if (savingsRate < 10) {
-      opportunity = `Consider reducing ${topCategory} spending by 10% to save approximately ${formatMoney(topAmount * 0.1, data.currency)} monthly.`;
-      encouragement = "Small changes add up! Start with one category this week.";
-    } else if (savingsRate < 20) {
-      opportunity = `You're saving ${savingsRate}% of your income. Try increasing by 5% to accelerate your goals.`;
-      encouragement = "You're on the right track! Keep building that savings habit.";
-    } else {
-      opportunity = `Excellent savings rate of ${savingsRate}%. Consider investing your surplus for long-term growth.`;
-      encouragement = "You're a saving superstar! Your future self will thank you.";
-    }
-    
-    if (overBudget.length > 0) {
-      opportunity += ` Review ${overBudget.join(", ")} to stay within budget.`;
-    }
-    
-    return { summary, opportunity, encouragement };
-  },
-  
-  weeklyReport: (data) => {
-    const topCategory = data.topCategory || "Groceries";
-    const trend = data.trend || "stable";
-    const recommendations = [
-      `Reduce ${topCategory} spending by scheduling one meatless day per week.`,
-      `Set up automatic transfers to your savings account on payday.`,
-      `Review your subscriptions — you might have unused services.`
-    ];
-    return {
-      topCategory,
-      trend,
-      recommendations: recommendations.slice(0, 2),
-      assessment: trend === "up" ? "Your spending is increasing — time to review." : "Your spending is stable — good job!"
-    };
-  },
-  
-  transactionExplanation: (data) => {
-    const desc = data.description || "Unknown merchant";
-    const amount = data.amount || 0;
-    const category = data.category || "Other";
-    
-    let explanation = `This transaction at ${desc} for ${formatMoney(amount, data.currency)} appears to be a ${category.toLowerCase()} purchase.`;
-    
-    if (category === "Groceries") {
-      explanation += " It's part of your essential spending. Consider meal planning to optimize your grocery budget.";
-    } else if (category === "Entertainment") {
-      explanation += " This is discretionary spending. Track it to ensure it stays within your entertainment budget.";
-    } else if (category === "Bills") {
-      explanation += " This is a recurring expense. Ensure you have budgeted for it monthly.";
-    }
-    
-    return explanation;
-  }
+// NVIDIA DeepSeek API Configuration
+const NVIDIA_CONFIG = {
+  apiKey: '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',
+  baseURL: 'https://integrate.api.nvidia.com/v1',
+  model: 'deepseek-ai/deepseek-v4-flash',
 };
 
-// Real AI service with NVIDIA endpoint
-async function callAIService(prompt, endpoint = null) {
-  // Return mock data if no endpoint provided
-  if (!endpoint) {
-    return mockAIResponses;
-  }
-  
+async function callNVIDIA(prompt, systemPrompt = null) {
   try {
-    const response = await fetch(endpoint, {
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: prompt });
+
+    const response = await fetch(`${NVIDIA_CONFIG.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${NVIDIA_CONFIG.apiKey}`,
       },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({
+        model: NVIDIA_CONFIG.model,
+        messages: messages,
+        temperature: 0.7,
+        top_p: 0.95,
+        max_tokens: 4096,
+        chat_template_kwargs: { thinking: true, reasoning_effort: "high" },
+        stream: false
+      })
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('NVIDIA API error:', errorText);
+      // Fallback to mock
+      return getMockResponse(prompt);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
     
-    if (!response.ok) throw new Error('AI service error');
-    return await response.json();
+    // Try to parse JSON from the response
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.warn('Could not parse AI response as JSON, using raw content');
+    }
+    
+    // If response is plain text, wrap it
+    return { raw: content };
+    
   } catch (error) {
     console.error('AI service error:', error);
-    // Fallback to mock responses
-    return mockAIResponses;
+    // Fallback to mock
+    return getMockResponse(prompt);
   }
+}
+
+// Mock responses for when API fails
+function getMockResponse(prompt) {
+  // Parse the prompt to determine what type of response is needed
+  if (prompt.includes("financial advisor")) {
+    return {
+      summary: "Your spending this month is within your income range.",
+      opportunity: "Consider reviewing your Groceries category to find potential savings.",
+      encouragement: "Every small step counts toward financial freedom!"
+    };
+  }
+  if (prompt.includes("weekly report")) {
+    return {
+      topCategory: "Groceries",
+      trend: "stable",
+      assessment: "Your spending is stable — good job!",
+      recommendations: [
+        "Review your subscriptions for unused services.",
+        "Set up automatic transfers to your savings account."
+      ]
+    };
+  }
+  return "I'm analyzing your financial data and will provide insights shortly.";
 }
 
 // ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────
@@ -535,7 +531,6 @@ const css = `
   .currency-banner-value { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
   .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
 
-  /* ─── AI ADVISOR STYLES ─── */
   .ai-advisor-card {
     background: linear-gradient(135deg, var(--mint)10, var(--surface));
     border: 1px solid var(--mint);
@@ -596,7 +591,6 @@ const css = `
   }
   .ai-advisor-refresh:hover { background: var(--bg); }
 
-  /* ─── AI REPORT STYLES ─── */
   .ai-report-card {
     background: var(--surface);
     border-radius: 16px;
@@ -626,7 +620,6 @@ const css = `
   }
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-  /* ─── TRANSACTION EXPLANATION MODAL ─── */
   .tx-explanation {
     background: var(--bg);
     border-radius: 12px;
@@ -647,7 +640,6 @@ const css = `
     margin-bottom: 4px;
   }
 
-  /* ─── FINANCIAL HEALTH SCORE STYLES ─── */
   .health-score-card {
     background: var(--surface);
     border-radius: 16px;
@@ -1095,7 +1087,7 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [showReport, setShowReport] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [report, setReport] = useState(null);
-  const [aiEndpoint, setAiEndpoint] = useState(localStorage.getItem("ss_ai_endpoint") || "");
+  const [aiStatus, setAiStatus] = useState("idle"); // idle, loading, success, error
 
   // Calculate data for AI
   const now = new Date();
@@ -1132,6 +1124,7 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   
   const generateAdvice = async () => {
     setLoading(true);
+    setAiStatus("loading");
     try {
       const data = {
         totalIncome,
@@ -1144,11 +1137,54 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
         transactionCount: monthTxs.length
       };
       
-      // Use mock data for now
-      const mockResponse = mockAIResponses.advisor(data);
-      setAdvice(mockResponse);
+      const prompt = `You are a financial advisor for SpendSight users. 
+Analyze this user's spending data and provide personalized advice.
+
+User financial data:
+- Monthly income: ${formatMoney(totalIncome, currency)}
+- Total spent: ${formatMoney(totalSpent, currency)}
+- Savings rate: ${savingsRate.toFixed(1)}%
+- Top spending category: ${topCat ? topCat[0] : "None"} (${formatMoney(topCat ? topCat[1] : 0, currency)})
+- Categories over budget: ${overBudget.length > 0 ? overBudget.join(", ") : "None"}
+
+Return a JSON object with exactly these keys:
+{
+  "summary": "A one-sentence summary of their spending this month",
+  "opportunity": "One specific savings opportunity with a suggested amount",
+  "encouragement": "A brief encouraging message"
+}`;
+
+      const result = await callNVIDIA(prompt);
+      
+      // If we got a raw response, try to parse it
+      let parsedResult = result;
+      if (result.raw) {
+        try {
+          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[0]);
+          } else {
+            // Fallback: create structured response from raw
+            parsedResult = {
+              summary: result.raw.substring(0, 100) + "...",
+              opportunity: "Review your spending categories for potential savings.",
+              encouragement: "Every small step counts!"
+            };
+          }
+        } catch (e) {
+          parsedResult = {
+            summary: result.raw.substring(0, 100) + "...",
+            opportunity: "Review your spending categories for potential savings.",
+            encouragement: "Keep tracking your finances!"
+          };
+        }
+      }
+      
+      setAdvice(parsedResult);
+      setAiStatus("success");
     } catch (error) {
       console.error('AI advisor error:', error);
+      setAiStatus("error");
       setAdvice({
         summary: "We're having trouble generating advice right now. Please try again later.",
         opportunity: "In the meantime, review your top spending categories.",
@@ -1162,35 +1198,64 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
     setReportLoading(true);
     setShowReport(true);
     try {
-      const data = {
-        totalIncome,
-        totalSpent,
-        savingsRate,
-        topCategory: topCat ? topCat[0] : "None",
-        trend: totalSpent > (prevMonthSpent || 0) ? "up" : "down",
-        currency
-      };
+      const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+      const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+      const prevMonthSpent = transactions.filter(t => {
+        const d = new Date(t.date);
+        return d.getMonth() === prevMonth && d.getFullYear() === prevYear && t.type === "debit";
+      }).reduce((sum, t) => sum + t.amount, 0);
       
-      const mockResponse = mockAIResponses.weeklyReport(data);
-      setReport(mockResponse);
+      const prompt = `Generate a weekly spending report for a user with:
+- Top spending category: ${topCat ? topCat[0] : "None"}
+- Spending trend: ${totalSpent > prevMonthSpent ? "up" : "down"} (${totalSpent > prevMonthSpent ? "increasing" : "decreasing"})
+- Current savings rate: ${savingsRate.toFixed(1)}%
+
+Return a JSON object with:
+{
+  "topCategory": "The user's top spending category",
+  "trend": "up" or "down",
+  "assessment": "A brief assessment of their spending health",
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}`;
+
+      const result = await callNVIDIA(prompt);
+      
+      let parsedResult = result;
+      if (result.raw) {
+        try {
+          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[0]);
+          } else {
+            parsedResult = {
+              topCategory: topCat ? topCat[0] : "None",
+              trend: totalSpent > prevMonthSpent ? "up" : "down",
+              assessment: "Your spending is within normal ranges.",
+              recommendations: ["Review your subscriptions for unused services."]
+            };
+          }
+        } catch (e) {
+          parsedResult = {
+            topCategory: topCat ? topCat[0] : "None",
+            trend: totalSpent > prevMonthSpent ? "up" : "down",
+            assessment: "Your spending is within normal ranges.",
+            recommendations: ["Review your subscriptions for unused services."]
+          };
+        }
+      }
+      
+      setReport(parsedResult);
     } catch (error) {
+      console.error('AI report error:', error);
       setReport({
         topCategory: "Unable to analyze",
         trend: "unknown",
-        recommendations: ["Please try again later"],
-        assessment: "We're having trouble generating your report."
+        assessment: "We're having trouble generating your report.",
+        recommendations: ["Please try again later."]
       });
     }
     setReportLoading(false);
   };
-  
-  // Get previous month spend for trend
-  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-  const prevMonthSpent = transactions.filter(t => {
-    const d = new Date(t.date);
-    return d.getMonth() === prevMonth && d.getFullYear() === prevYear && t.type === "debit";
-  }).reduce((sum, t) => sum + t.amount, 0);
   
   // Auto-generate advice on mount
   useEffect(() => {
@@ -1218,6 +1283,17 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
         <div className="ai-advisor-header">
           <span style={{ fontSize: 24 }}>🤖</span>
           <span className="ai-advisor-badge">AI Advisor</span>
+          <span className="ai-advisor-badge" style={{ 
+            background: aiStatus === "success" ? "var(--mint)" : 
+                       aiStatus === "loading" ? "#F6C90E" : 
+                       aiStatus === "error" ? "var(--danger)" : "var(--muted)",
+            color: aiStatus === "loading" ? "var(--navy-deep)" : "white"
+          }}>
+            {aiStatus === "idle" ? "Ready" : 
+             aiStatus === "loading" ? "⏳ Thinking" : 
+             aiStatus === "success" ? "✓ Live" : 
+             aiStatus === "error" ? "✗ Error" : "Ready"}
+          </span>
           <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
             {loading ? "⏳" : "🔄 Refresh"}
           </button>
@@ -1226,7 +1302,7 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
         {loading ? (
           <div className="ai-report-loading">
             <div className="spinner" />
-            <div style={{ marginTop: 12 }}>Analyzing your finances...</div>
+            <div style={{ marginTop: 12 }}>Analyzing your finances with DeepSeek AI...</div>
           </div>
         ) : advice ? (
           <>
@@ -1237,13 +1313,12 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
         ) : null}
       </div>
       
-      {/* Weekly Report Button */}
       <div style={{ marginBottom: 24 }}>
         <button className="btn-outline" onClick={() => setShowReport(!showReport)}>
           📊 {showReport ? "Hide" : "Generate"} Weekly Report
         </button>
         <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 12 }}>
-          AI-powered spending analysis
+          Powered by DeepSeek AI
         </span>
       </div>
       
@@ -1253,17 +1328,17 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
           {reportLoading ? (
             <div className="ai-report-loading">
               <div className="spinner" />
-              <div style={{ marginTop: 12 }}>Generating your report...</div>
+              <div style={{ marginTop: 12 }}>Generating your report with DeepSeek...</div>
             </div>
           ) : report ? (
             <div className="ai-report-content">
               <p><strong>Top Category:</strong> {report.topCategory}</p>
-              <p><strong>Spending Trend:</strong> {report.trend === "up" ? "📈 Increasing" : "📉 Decreasing"}</p>
+              <p><strong>Spending Trend:</strong> {report.trend === "up" ? "📈 Increasing" : report.trend === "down" ? "📉 Decreasing" : "➡️ Stable"}</p>
               <p><strong>Assessment:</strong> {report.assessment}</p>
               <div style={{ marginTop: 12 }}>
                 <strong>Recommendations:</strong>
                 <ul style={{ marginTop: 8, paddingLeft: 20 }}>
-                  {report.recommendations.map((rec, i) => (
+                  {report.recommendations && report.recommendations.map((rec, i) => (
                     <li key={i} style={{ marginBottom: 4 }}>{rec}</li>
                   ))}
                 </ul>
@@ -1643,7 +1718,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       
       <div className="page-header"><div className="greeting">{getGreeting()}, <span className="greeting-name">{user.name} 👋</span></div><div className="greeting-tagline">{tagline}</div></div>
       
-      {/* ─── AI ADVISOR (Batch B) ─── */}
+      {/* ─── AI ADVISOR ─── */}
       <AIAdvisor 
         transactions={transactions}
         incomes={incomes}
@@ -1839,6 +1914,8 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   const [showSplitModal, setShowSplitModal] = useState(null);
   const [showEditModal, setShowEditModal] = useState(null);
   const [showExplanation, setShowExplanation] = useState(null);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationText, setExplanationText] = useState("");
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedTxIds, setSelectedTxIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -1977,12 +2054,29 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
     setSelectedTxIds(newSet);
   };
   
-  const getExplanation = (tx) => {
-    const mockResponse = mockAIResponses.transactionExplanation({
-      ...tx,
-      currency
-    });
-    return mockResponse;
+  const getExplanation = async (tx) => {
+    setExplanationLoading(true);
+    setExplanationText("");
+    try {
+      const prompt = `Explain this transaction to a user in a helpful way:
+- Description: ${tx.description}
+- Amount: ${formatMoney(tx.amount, currency)}
+- Category: ${tx.category}
+- Date: ${tx.date}
+
+Provide a short, useful explanation of what this transaction represents in their financial picture.`;
+      
+      const result = await callNVIDIA(prompt);
+      let explanation = result.raw || JSON.stringify(result);
+      // Clean up the response
+      explanation = explanation.replace(/\{[\s\S]*\}/, '').trim() || explanation;
+      if (explanation.length > 500) explanation = explanation.substring(0, 500) + "...";
+      setExplanationText(explanation || "This transaction appears to be a standard purchase. No specific insights available.");
+    } catch (error) {
+      console.error('Explanation error:', error);
+      setExplanationText("This transaction appears to be a standard purchase. No specific insights available.");
+    }
+    setExplanationLoading(false);
   };
   
   return (
@@ -2008,7 +2102,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       
       <div className="card">
         {filtered.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions found</div><div className="empty-sub">Try a different search or filter</div></div>) : (
-          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
+          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); getExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
         )}
       </div>
       
@@ -2020,7 +2114,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
       
       {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
       
-      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div><div className="tx-explanation-text">{getExplanation(showExplanation)}</div></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
+      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing with DeepSeek AI...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
     </div>
   );
 }
