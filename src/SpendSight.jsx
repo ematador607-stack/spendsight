@@ -175,8 +175,7 @@ function parseCSV(csvText) {
 // ─── AI SERVICE ──────────────────────────────────────────────────────────────
 // AI calls go through YOUR backend proxy — the NVIDIA key lives server-side only
 // (env var), never in this client bundle. Point this at your Flask backend.
-const AI_BACKEND_URL = (typeof process !== 'undefined' && process.env?.REACT_APP_AI_BACKEND_URL)
-  || '/api/ai/advise'; // adjust to match your Flask route
+const AI_BACKEND_URL = import.meta.env?.VITE_AI_BACKEND_URL || 'http://localhost:5000/api/ai/advise';
 
 async function callNVIDIA(prompt, systemPrompt = null) {
   try {
