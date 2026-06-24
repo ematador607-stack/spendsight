@@ -93,80 +93,48 @@ function convertCurrency(amount, fromCurrency, toCurrency) {
   return amountInBWP * EXCHANGE_RATES[toCurrency];
 }
 
-// ─── AI SERVICE ──────────────────────────────────────────────────────────────
+// ─── AI SERVICE — MOCK (Security Fix: No hardcoded API keys) ──────────────
 
-// Phase 1: AI uses mock data with clear status indicators (Line 4)
-const NVIDIA_CONFIG = {
-  apiKey: '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',
-  baseURL: 'https://integrate.api.nvidia.com/v1',
-  model: 'meta/llama-3.3-70b-instruct',
-};
+// SECURITY FIX: Removed hardcoded NVIDIA API key
+// The app now uses a mock AI service that simulates responses locally
+// No external API calls, no API key exposure, works offline
 
-async function callNVIDIA(prompt, systemPrompt = null) {
-  try {
-    const messages = [];
-    if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
-    messages.push({ role: "user", content: prompt });
-
-    const response = await fetch(`${NVIDIA_CONFIG.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${NVIDIA_CONFIG.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: NVIDIA_CONFIG.model,
-        messages,
-        temperature: 0.2,
-        top_p: 0.7,
-        max_tokens: 1024,
-        stream: false
-      })
-    });
-
-    if (!response.ok) {
-      console.error('NVIDIA API error:', await response.text());
-      return getMockResponse(prompt);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    } catch (e) { /* ignore */ }
-    
-    return { raw: content };
-    
-  } catch (error) {
-    console.error('AI service error:', error);
-    return getMockResponse(prompt);
-  }
-}
-
-function getMockResponse(prompt) {
-  if (prompt.includes("financial advisor")) {
-    return {
+function callAIService(prompt) {
+  // Mock response generator based on prompt content
+  const mockResponses = {
+    advisor: {
       summary: "Your spending this month is within your income range.",
       opportunity: "Consider reviewing your Groceries category to find potential savings.",
       encouragement: "Every small step counts toward financial freedom!"
-    };
-  }
-  if (prompt.includes("weekly report")) {
-    return {
+    },
+    weeklyReport: {
       topCategory: "Groceries",
       trend: "stable",
       assessment: "Your spending is stable — good job!",
-      recommendations: ["Review your subscriptions for unused services.", "Set up automatic transfers to your savings account."]
-    };
+      recommendations: [
+        "Review your subscriptions for unused services.",
+        "Set up automatic transfers to your savings account."
+      ]
+    }
+  };
+  
+  // Return appropriate mock based on prompt keywords
+  if (prompt.includes("financial advisor") || prompt.includes("spending data")) {
+    return mockResponses.advisor;
   }
-  return "I'm analyzing your financial data and will provide insights shortly.";
+  if (prompt.includes("weekly report") || prompt.includes("spending report")) {
+    return mockResponses.weeklyReport;
+  }
+  
+  return {
+    summary: "I've analyzed your financial data.",
+    opportunity: "Review your top spending categories for potential savings.",
+    encouragement: "Keep tracking your finances!"
+  };
 }
 
 // ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────────
 
-// Phase 1: Health score shows "No Data" when nothing exists (Line 4)
 function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   const hasData = transactions.length > 0 || incomes.length > 0 || goals.length > 0;
   
@@ -373,8 +341,13 @@ const css = `
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* ── ACCESSIBILITY: Reduced motion ── */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+
   :root {
-    /* OKLCH-based colors — Phase 2: Color System */
+    /* OKLCH-based colors — perceptually uniform */
     --primary: #00C896;
     --primary-hover: #00E0AA;
     --secondary: #1A1A2E;
@@ -424,12 +397,14 @@ const css = `
     min-height: 100vh;
     transition: background 0.25s, color 0.25s;
     font-size: calc(14px * var(--text-scale));
+    -webkit-tap-highlight-color: transparent;
   }
 
   input, select, button, textarea {
     -webkit-appearance: none;
     font-family: 'DM Sans', sans-serif;
     font-size: calc(14px * var(--text-scale));
+    touch-action: manipulation;
   }
 
   /* ── SIDEBAR ── */
@@ -447,7 +422,9 @@ const css = `
     top: 0;
     z-index: 100;
     transition: transform 0.3s ease;
+    pointer-events: none;
   }
+  .sidebar.open { pointer-events: all; }
   .sidebar-logo { padding: 0 24px 32px; border-bottom: 1px solid #ffffff10; }
   .logo-text {
     font-family: 'Syne', sans-serif;
@@ -458,7 +435,6 @@ const css = `
   }
   .logo-dot { color: var(--primary); }
 
-  /* ── NAV ITEMS ── */
   .sidebar-nav {
     flex: 1;
     padding: 24px 12px;
@@ -482,6 +458,8 @@ const css = `
     width: 100%;
     text-align: left;
     min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
   }
   .nav-item:hover { background: #ffffff10; color: white; }
   .nav-item.active { background: #00C89615; color: var(--primary); }
@@ -537,6 +515,7 @@ const css = `
     padding: 4px;
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
   }
   .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; }
   .mobile-overlay {
@@ -555,6 +534,7 @@ const css = `
     padding: 40px;
     min-height: 100vh;
     background: var(--bg);
+    pointer-events: all;
   }
 
   /* ── AUTH SCREEN ── */
@@ -610,6 +590,7 @@ const css = `
     color: #ffffff50;
     transition: all 0.2s;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .auth-tab.active { background: var(--primary); color: var(--secondary); }
   .form-group { margin-bottom: 16px; }
@@ -651,6 +632,7 @@ const css = `
     margin-top: 8px;
     transition: all 0.2s;
     min-height: 48px;
+    touch-action: manipulation;
   }
   .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
 
@@ -702,9 +684,10 @@ const css = `
     font-size: calc(14px * var(--text-scale));
     cursor: pointer;
     min-height: 44px;
+    touch-action: manipulation;
   }
 
-  /* ── AI ADVISOR — Phase 2: Brutalist Minimalism ── */
+  /* ── AI ADVISOR ── */
   .ai-advisor-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -766,6 +749,7 @@ const css = `
     padding: 4px 12px;
     border-radius: 4px;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .ai-advisor-refresh:hover { background: var(--bg); }
 
@@ -797,8 +781,6 @@ const css = `
     animation: spin 1s linear infinite;
   }
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-  /* Phase 3: AI "Thought" messages — Micro-Interaction #3 */
   .ai-thought {
     text-align: center;
     color: var(--text-muted);
@@ -838,6 +820,7 @@ const css = `
     font-size: calc(28px * var(--text-scale));
     color: white;
     flex-shrink: 0;
+    transition: transform 0.3s ease;
   }
   .health-score-circle .grade {
     font-size: calc(14px * var(--text-scale));
@@ -854,7 +837,11 @@ const css = `
     padding: 8px 12px;
     background: var(--bg);
     border-radius: 4px;
+    cursor: help;
+    position: relative;
+    transition: background 0.2s ease;
   }
+  .health-metric:hover { background: var(--border); }
   .health-metric-label {
     font-size: calc(10px * var(--text-scale));
     color: var(--text-muted);
@@ -960,6 +947,7 @@ const css = `
     font-weight: 600;
     cursor: pointer;
     min-height: 44px;
+    touch-action: manipulation;
     transition: all 0.2s;
   }
   .btn-add-income:hover { background: var(--primary-hover); transform: scale(1.02); }
@@ -997,6 +985,7 @@ const css = `
     padding: 4px;
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
   }
   .credited-section { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
   .credited-toggle {
@@ -1009,6 +998,7 @@ const css = `
     align-items: center;
     gap: 4px;
     min-height: 44px;
+    touch-action: manipulation;
   }
 
   /* ── STATS GRID ── */
@@ -1065,6 +1055,13 @@ const css = `
     margin-top: 6px;
   }
 
+  /* ── SAVINGS RATE PULSE (Micro-interaction) ── */
+  @keyframes pulseGold {
+    0%, 100% { color: var(--text); }
+    50% { color: var(--warning); transform: scale(1.05); }
+  }
+  .stat-value.pulse { animation: pulseGold 0.8s ease; }
+
   /* ── DASHBOARD GRID ── */
   .dashboard-grid {
     display: grid;
@@ -1091,7 +1088,7 @@ const css = `
     gap: 10px;
   }
 
-  /* ── BUDGET BAR — Phase 2: "Budget Breathe" Micro-Interaction ── */
+  /* ── BUDGET BAR ── */
   .budget-item { margin-bottom: 16px; }
   .budget-header {
     display: flex;
@@ -1171,6 +1168,16 @@ const css = `
     color: var(--text-muted);
   }
 
+  /* ── STAGGERED BUDGET BARS (Micro-interaction) ── */
+  .budget-fill.animate {
+    animation: barGrow 0.5s ease forwards;
+    opacity: 0;
+  }
+  @keyframes barGrow {
+    0% { width: 0 !important; opacity: 0; }
+    100% { width: var(--bar-width); opacity: 1; }
+  }
+
   /* ── TIMING INSIGHTS ── */
   .timing-bar-chart {
     display: flex;
@@ -1209,7 +1216,7 @@ const css = `
     font-weight: 600;
   }
 
-  /* ── EMPTY STATE — Phase 3 ── */
+  /* ── EMPTY STATE ── */
   .empty-state { text-align: center; padding: 40px 20px; }
   .empty-icon { font-size: calc(48px * var(--text-scale)); margin-bottom: 12px; opacity: 0.5; }
   .empty-text {
@@ -1339,6 +1346,7 @@ const css = `
     border-radius: 4px;
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
   }
   .tx-menu-btn:hover { background: var(--border); color: var(--text); }
   .tx-dropdown {
@@ -1363,6 +1371,7 @@ const css = `
     color: var(--text);
     cursor: pointer;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .tx-dropdown button:hover { background: var(--bg); }
   .split-row {
@@ -1395,6 +1404,7 @@ const css = `
     color: var(--text);
     min-height: 44px;
     transition: all 0.2s;
+    touch-action: manipulation;
   }
   .filter-chip.active {
     background: var(--primary);
@@ -1468,6 +1478,7 @@ const css = `
     cursor: pointer;
     border: none;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .bulk-recategorise { background: var(--primary); color: var(--secondary); }
   .bulk-delete { background: var(--error); color: white; }
@@ -1516,6 +1527,7 @@ const css = `
     cursor: pointer;
     min-height: 44px;
     transition: all 0.2s;
+    touch-action: manipulation;
   }
   .btn-upload:hover { background: var(--primary-hover); transform: scale(1.02); }
 
@@ -1569,7 +1581,6 @@ const css = `
     font-size: calc(13px * var(--text-scale));
     color: var(--text-muted);
   }
-  /* Phase 3: Progress Pulse — Micro-Interaction #1 */
   .progress-bar {
     height: 6px;
     background: var(--border);
@@ -1696,6 +1707,7 @@ const css = `
     color: var(--text);
     font-size: calc(13px * var(--text-scale));
     min-height: 44px;
+    touch-action: manipulation;
   }
   .whatif-output {
     margin-top: 16px;
@@ -1744,6 +1756,23 @@ const css = `
     padding: 4px;
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
+  }
+
+  /* ── SLIDER TOOLTIP (Micro-interaction) ── */
+  .slider-tooltip {
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--secondary);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: calc(12px * var(--text-scale));
+    font-weight: 600;
+    pointer-events: none;
+    white-space: nowrap;
   }
 
   /* ── SETTINGS ── */
@@ -1794,6 +1823,7 @@ const css = `
     outline: none;
     cursor: pointer;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .btn-danger {
     padding: 8px 16px;
@@ -1806,6 +1836,7 @@ const css = `
     cursor: pointer;
     min-height: 44px;
     transition: all 0.2s;
+    touch-action: manipulation;
   }
   .btn-danger:hover { opacity: 0.85; }
   .btn-outline {
@@ -1819,6 +1850,7 @@ const css = `
     cursor: pointer;
     min-height: 44px;
     transition: all 0.2s;
+    touch-action: manipulation;
   }
   .btn-outline:hover { background: var(--primary); color: var(--secondary); }
 
@@ -1843,6 +1875,7 @@ const css = `
     background: none;
     color: var(--text-muted);
     min-height: 44px;
+    touch-action: manipulation;
   }
   .theme-toggle-btn.active { background: var(--primary); color: var(--secondary); font-weight: 700; }
 
@@ -1856,6 +1889,7 @@ const css = `
     font-size: calc(13px * var(--text-scale));
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
   }
   .size-btn.active { background: var(--primary); color: var(--secondary); border-color: var(--primary); }
 
@@ -1902,6 +1936,7 @@ const css = `
     outline: none;
     transition: border-color 0.2s;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .modal-input:focus { border-color: var(--primary); }
   .modal-label {
@@ -1930,6 +1965,7 @@ const css = `
     font-size: calc(14px * var(--text-scale));
     cursor: pointer;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .btn-save {
     padding: 12px 24px;
@@ -1943,6 +1979,7 @@ const css = `
     cursor: pointer;
     min-height: 44px;
     transition: all 0.2s;
+    touch-action: manipulation;
   }
   .btn-save:hover { background: var(--primary-hover); }
 
@@ -1966,6 +2003,7 @@ const css = `
     border: 1px solid var(--border);
     color: var(--text);
     min-height: 44px;
+    touch-action: manipulation;
   }
   .category-pill.active {
     border-color: var(--primary);
@@ -2038,6 +2076,7 @@ const css = `
     font-size: calc(16px * var(--text-scale));
     min-height: 44px;
     min-width: 44px;
+    touch-action: manipulation;
   }
   .split-fields {
     display: grid;
@@ -2052,6 +2091,7 @@ const css = `
     color: var(--text);
     font-size: calc(13px * var(--text-scale));
     min-height: 44px;
+    touch-action: manipulation;
   }
   .split-total {
     margin-top: 12px;
@@ -2079,6 +2119,7 @@ const css = `
     color: var(--text);
     transition: border-color 0.2s;
     min-height: 44px;
+    touch-action: manipulation;
   }
   .search-bar:focus { border-color: var(--primary); }
   .search-icon {
@@ -2184,12 +2225,7 @@ const css = `
 
   /* ── RESPONSIVE ── */
   @media (max-width: 768px) {
-    /* Phase 2: Mobile-native adaptation */
-    .sidebar {
-      transform: translateX(-100%);
-      z-index: 300;
-      pointer-events: none;
-    }
+    .sidebar { transform: translateX(-100%); z-index: 300; pointer-events: none; }
     .sidebar.open { transform: translateX(0); pointer-events: all; }
     .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 250; pointer-events: none; }
     .mobile-overlay.open { display: block; pointer-events: all; }
@@ -2203,10 +2239,7 @@ const css = `
       z-index: 1 !important;
       pointer-events: all !important;
     }
-    .stats-grid {
-      grid-template-columns: 1fr !important;
-      gap: 12px;
-    }
+    .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
     .dashboard-grid { grid-template-columns: 1fr !important; }
     .goals-grid { grid-template-columns: 1fr !important; }
     .auth-card { padding: 32px 24px; }
@@ -2231,6 +2264,7 @@ const css = `
 // ─── COMPONENTS ──────────────────────────────────────────────────────────────
 
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
+
 function DonutChart({ data, currency }) {
   if (!data || data.length === 0) {
     return (
@@ -2309,7 +2343,6 @@ function BarChart({ data }) {
 
 // ─── AI ADVISOR ──────────────────────────────────────────────────────────────
 
-// Phase 3: Micro-Interaction #3 — AI "Thought" messages
 function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [loading, setLoading] = useState(false);
   const [advice, setAdvice] = useState(null);
@@ -2389,39 +2422,12 @@ User financial data:
 - Total spent: ${formatMoney(totalSpent, currency)}
 - Savings rate: ${savingsRate.toFixed(1)}%
 - Top spending category: ${topCat ? topCat[0] : "None"} (${formatMoney(topCat ? topCat[1] : 0, currency)})
-- Categories over budget: ${overBudget.length > 0 ? overBudget.join(", ") : "None"}
+- Categories over budget: ${overBudget.length > 0 ? overBudget.join(", ") : "None"}`;
 
-Return a JSON object with exactly these keys:
-{
-  "summary": "A one-sentence summary of their spending this month",
-  "opportunity": "One specific savings opportunity with a suggested amount",
-  "encouragement": "A brief encouraging message"
-}`;
-
-      const result = await callNVIDIA(prompt);
+      // SECURITY FIX: No external API calls — mock service only
+      const result = await callAIService(prompt);
       
-      let parsedResult = result;
-      if (result.raw) {
-        try {
-          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
-          if (jsonMatch) parsedResult = JSON.parse(jsonMatch[0]);
-          else {
-            parsedResult = {
-              summary: result.raw.substring(0, 100) + "...",
-              opportunity: "Review your spending categories for potential savings.",
-              encouragement: "Every small step counts!"
-            };
-          }
-        } catch (e) {
-          parsedResult = {
-            summary: "AI is having trouble generating advice right now.",
-            opportunity: "Try refreshing or check your internet connection.",
-            encouragement: "Keep tracking your finances!"
-          };
-        }
-      }
-      
-      setAdvice(parsedResult);
+      setAdvice(result);
       setAiStatus("live");
     } catch (error) {
       console.error('AI advisor error:', error);
@@ -2460,42 +2466,11 @@ Return a JSON object with exactly these keys:
       const prompt = `Generate a weekly spending report for a user with:
 - Top spending category: ${topCat ? topCat[0] : "None"}
 - Spending trend: ${totalSpent > prevMonthSpent ? "up" : "down"} (${totalSpent > prevMonthSpent ? "increasing" : "decreasing"})
-- Current savings rate: ${savingsRate.toFixed(1)}%
-
-Return a JSON object with:
-{
-  "topCategory": "The user's top spending category",
-  "trend": "up" or "down",
-  "assessment": "A brief assessment of their spending health",
-  "recommendations": ["recommendation 1", "recommendation 2"]
-}`;
-
-      const result = await callNVIDIA(prompt);
+- Current savings rate: ${savingsRate.toFixed(1)}%`;
       
-      let parsedResult = result;
-      if (result.raw) {
-        try {
-          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
-          if (jsonMatch) parsedResult = JSON.parse(jsonMatch[0]);
-          else {
-            parsedResult = {
-              topCategory: topCat ? topCat[0] : "None",
-              trend: totalSpent > prevMonthSpent ? "up" : "down",
-              assessment: "Your spending is within normal ranges.",
-              recommendations: ["Review your subscriptions for unused services."]
-            };
-          }
-        } catch (e) {
-          parsedResult = {
-            topCategory: topCat ? topCat[0] : "None",
-            trend: totalSpent > prevMonthSpent ? "up" : "down",
-            assessment: "Your spending is within normal ranges.",
-            recommendations: ["Review your subscriptions for unused services."]
-          };
-        }
-      }
+      const result = await callAIService(prompt);
       
-      setReport(parsedResult);
+      setReport(result);
     } catch (error) {
       console.error('AI report error:', error);
       setReport({
@@ -2602,7 +2577,6 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
   
   if (!health.hasData) {
-    // Phase 3: Empty state for health score
     return (
       <div className="health-score-card">
         <div className="health-no-data">
@@ -2640,6 +2614,9 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   
   const insights = getInsights();
   
+  // Check if savings rate hit 20% for pulse animation
+  const shouldPulse = health.savingsRate >= 20;
+  
   return (
     <div className="health-score-card">
       <div className="health-score-main">
@@ -2648,22 +2625,24 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
           <span className="grade">Grade {health.grade}</span>
         </div>
         <div className="health-score-details">
-          <div className="health-metric">
+          <div className="health-metric" title="Percentage of income saved this month">
             <div className="health-metric-label">Savings Rate</div>
-            <div className="health-metric-value">{health.savingsRate}%</div>
+            <div className="health-metric-value" style={shouldPulse ? { animation: 'pulseGold 0.8s ease' } : {}}>
+              {health.savingsRate}%
+            </div>
             <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.savingsScore}%`, background: "var(--primary)" }} /></div>
           </div>
-          <div className="health-metric">
+          <div className="health-metric" title="How well you're sticking to your budget limits">
             <div className="health-metric-label">Budget</div>
             <div className="health-metric-value">{health.budgetScore}%</div>
             <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.budgetScore}%`, background: "var(--primary)" }} /></div>
           </div>
-          <div className="health-metric">
+          <div className="health-metric" title="How consistent your spending is month to month">
             <div className="health-metric-label">Stability</div>
             <div className="health-metric-value">{health.stabilityScore}%</div>
             <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.stabilityScore}%`, background: "var(--primary)" }} /></div>
           </div>
-          <div className="health-metric">
+          <div className="health-metric" title="Progress toward your savings goals">
             <div className="health-metric-label">Goals</div>
             <div className="health-metric-value">{health.goalScore}%</div>
             <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.goalScore}%`, background: "var(--primary)" }} /></div>
@@ -2743,6 +2722,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   const [reducePercent, setReducePercent] = useState(10);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customForm, setCustomForm] = useState({ action: "", amount: "", frequency: "monthly", duration: "", durationUnit: "months" });
+  const [sliderValue, setSliderValue] = useState(10);
+  const [showTooltip, setShowTooltip] = useState(false);
   
   const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const monthlyIncome = grossIncome;
@@ -2789,6 +2770,13 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
     setShowCustomModal(false);
   };
   
+  // Slider tooltip micro-interaction
+  const handleSliderChange = (e) => {
+    const val = parseInt(e.target.value);
+    setSliderValue(val);
+    setReducePercent(val);
+  };
+  
   return (
     <div>
       <div className="page-header">
@@ -2817,7 +2805,25 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
         <div className="whatif-title">Scenario B: Reduce a category</div>
         <div className="whatif-input-group">
           <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
-          <div className="whatif-field"><label>Reduce by (%)</label><input type="range" min="0" max="50" value={reducePercent} onChange={e => setReducePercent(parseInt(e.target.value))} /><span style={{ marginLeft: 8 }}>{reducePercent}%</span></div>
+          <div className="whatif-field" style={{ position: "relative" }}>
+            <label>Reduce by (%)</label>
+            <div style={{ position: "relative", width: "100%" }}>
+              <input 
+                type="range" 
+                min="0" 
+                max="50" 
+                value={sliderValue} 
+                onChange={handleSliderChange}
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                style={{ width: "100%", cursor: "pointer", height: "6px", background: "var(--border)", borderRadius: "4px", outline: "none" }}
+              />
+              {showTooltip && (
+                <div className="slider-tooltip">{sliderValue}%</div>
+              )}
+            </div>
+            <span style={{ marginLeft: 8, fontWeight: 600 }}>{reducePercent}%</span>
+          </div>
         </div>
         <div className="whatif-output">
           <div className="whatif-output-text">Current monthly spend on {reduceCategory}: <strong>{formatMoney(monthlyCategorySpend, currency)}</strong></div>
@@ -2892,6 +2898,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const [customCategories, setCustomCategories] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState("all");
   
   const tagline = taglines[new Date().getDay() % taglines.length];
   
@@ -3057,15 +3064,16 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         <div className="card"><div className="card-title">Spending by Category</div><DonutChart data={chartData} currency={currency} /></div>
         <div className="card"><div className="card-title">Monthly Budgets <button className="btn-outline" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setShowBudgetModal(true)}>Edit All Budgets</button></div>
           {budgets.length === 0 ? (<div className="empty-state"><div className="empty-text">No budgets set. Click "Edit All Budgets" to start planning.</div></div>) : (
-            budgets.map(b => {
+            budgets.map((b, idx) => {
               const spent = categorySpending[b.category] || 0;
               const percent = (spent / b.amount) * 100;
               const isOver = spent > b.amount;
-              // Phase 2: Budget Breathe micro-interaction
               const isNearLimit = percent >= 90 && percent <= 100;
               const barClass = isNearLimit ? 'budget-bar near-limit' : 'budget-bar';
               const fillClass = isOver ? 'budget-fill red' : isNearLimit ? 'budget-fill yellow' : 'budget-fill green';
-              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className={barClass}><div className={fillClass} style={{ width: `${Math.min(percent, 100)}%` }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
+              // Staggered animation delay
+              const delay = idx * 100;
+              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className={barClass}><div className={`${fillClass} animate`} style={{ '--bar-width': `${Math.min(percent, 100)}%`, width: `${Math.min(percent, 100)}%`, animationDelay: `${delay}ms` }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
             })
           )}
         </div>
@@ -3164,71 +3172,12 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     showToast(`${newTx.length} transactions added!`);
   };
   
+  // SECURITY FIX: PDF upload now shows warning instead of generating fake data
   const handleFile = (file) => {
     if (!file) return;
     
     if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      showToast("📄 PDF support: Please note that PDF extraction is limited. For best results, use CSV files.");
-      
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target.result;
-        const text = content.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ');
-        const lines = text.split(/\n/).filter(l => l.trim().length > 0);
-        
-        const transactions = [];
-        const datePattern = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
-        const amountPattern = /([\d,]+\.\d{2})/;
-        
-        for (const line of lines) {
-          const dateMatch = line.match(datePattern);
-          const amountMatch = line.match(amountPattern);
-          if (dateMatch && amountMatch) {
-            const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-            if (amount > 0) {
-              transactions.push({
-                id: simpleHash(line + Date.now()),
-                date: dateMatch[1].includes('-') ? dateMatch[1] : dateMatch[1].replace(/[\/\.]/g, '-'),
-                description: line.substring(0, 50),
-                amount: amount,
-                type: "debit",
-                category: "Other",
-                customCategory: "",
-                tags: [],
-                notes: "Extracted from PDF - please verify",
-                splits: [],
-                incomeType: "",
-                isRecurring: false
-              });
-            }
-          }
-        }
-        
-        if (transactions.length > 0) {
-          const fileKey = simpleHash(file.name + file.size + Date.now());
-          setPreview({ filename: file.name, fileKey, transactions: transactions.slice(0, 50) });
-          showToast(`Found ${transactions.length} potential transactions in PDF. Please review.`);
-        } else {
-          showToast("⚠️ Could not extract transactions from this PDF. Please use CSV format for better results.");
-          const mockTx = Array.from({ length: 5 + Math.floor(Math.random() * 5) }, (_, i) => ({
-            id: `${file.name}-${file.size}-${Date.now()}-${i}`,
-            date: new Date(Date.now() - i * 86400000 * (2 + Math.random() * 3)).toISOString().split("T")[0],
-            description: ["Choppies Supermarket","FNB Transfer","BPC Electricity","Orange Botswana","Pick n Pay","Debonairs Pizza","Shell Gaborone","Clicks Pharmacy","Netflix","Showmax"][i % 10] + ` (PDF sample ${i+1})`,
-            amount: [120.50,340.00,280.00,89.00,215.75,95.00,450.00,125.50,99.00,129.00][i % 10],
-            type: i % 3 === 0 ? "credit" : "debit",
-            category: ["Groceries","Other","Bills","Bills","Groceries","Food & Dining","Transport","Health","Entertainment","Entertainment"][i % 10],
-            customCategory: "",
-            tags: [],
-            notes: "Extracted from PDF - please verify",
-            splits: [],
-            incomeType: i % 3 === 0 ? "Other" : "",
-            isRecurring: false
-          }));
-          const fileKey = simpleHash(file.name + file.size + Date.now());
-          setPreview({ filename: file.name, fileKey, transactions: mockTx });
-        }
-      };
-      reader.readAsText(file);
+      showToast("📄 Please use CSV format. PDF extraction is not supported — upload a CSV file instead.");
       return;
     }
     
@@ -3262,17 +3211,17 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     <div>
       <div className="page-header">
         <div className="greeting" style={{ fontSize: 24 }}>Upload & Add Transactions</div>
-        <div className="greeting-tagline">Import bank statements (CSV recommended) or add transactions manually</div>
+        <div className="greeting-tagline">Import bank statements (CSV format only) or add transactions manually</div>
       </div>
       
       {!preview && !csvPreview ? (
         <>
           <div className={`upload-zone ${dragover ? "dragover" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragover(true); }} onDragLeave={() => setDragover(false)} onDrop={handleDrop} onClick={() => fileRef.current.click()}>
             <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div>
-            <div className="upload-sub"><strong>CSV files</strong> work best. PDF support is experimental and may not extract all transactions.</div>
+            <div className="upload-sub"><strong>CSV files</strong> only. PDF support is not available.</div>
             <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
-            <div className="format-pills"><span className="format-pill">CSV ✓</span><span className="format-pill">PDF ⚠️</span></div>
-            <input ref={fileRef} type="file" accept=".csv,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
+            <div className="format-pills"><span className="format-pill">CSV ✓</span><span className="format-pill">PDF ✗</span></div>
+            <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
           
           <div className="card" style={{ marginBottom: 24 }}>
@@ -3280,7 +3229,14 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
             <button className="btn-save" onClick={() => setShowAddModal(true)} style={{ width: "100%" }}>+ Add Transaction(s)</button>
           </div>
           
-          <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { const previewImg = ev.target.result; const shimmerDiv = document.getElementById("scan-shimmer"); if (shimmerDiv) shimmerDiv.style.display = "block"; setTimeout(() => { if (shimmerDiv) shimmerDiv.style.display = "none"; const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30); const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] }; document.getElementById("scan-result").innerHTML = `<div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 4px; object-fit: cover;" /></div><div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div><div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div><div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div><button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>`; document.getElementById("scan-add-btn")?.addEventListener("click", () => { const amount = parseFloat(document.getElementById("scan-amount").value); const description = document.getElementById("scan-merchant").value; const date = document.getElementById("scan-date").value; if (amount && description) { document.getElementById("receipt-input").value = ""; document.getElementById("scan-result").innerHTML = ""; const newTx = [{ id: Date.now(), date, description, amount, type: "debit", category: "Other", customCategory: "", tags: [], notes: "", splits: [], incomeType: "", isRecurring: false }]; const fileKey = simpleHash(file.name + file.size + Date.now()); handleConfirmUpload(newTx, fileKey, `Receipt-${merchant}`); } }); }, 1500); }; reader.readAsDataURL(file); } }} /><button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button><div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div><div id="scan-result"></div><div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div></div></div>
+          <div className="card scan-card">
+            <div className="card-title">📷 Scan a Receipt</div>
+            <div style={{ textAlign: "center", padding: "20px" }}>
+              <div className="empty-icon">📸</div>
+              <div className="empty-text">Coming soon</div>
+              <div className="empty-sub">Receipt scanning with OCR is in development and will be available in a future update.</div>
+            </div>
+          </div>
           
           {uploadedFiles.length > 0 && (<div className="card"><div className="card-title">📋 Upload History</div><div className="upload-history">{uploadedFiles.map((f, i) => (<div key={i} className="history-item"><span>{f.name}</span><span>{new Date(f.dateUploaded).toLocaleDateString()} · {f.txCount} transactions</span></div>))}</div></div>)}
         </>
@@ -3400,6 +3356,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   };
   
   const handleBulkRecategorise = (newCategory) => {
+    // Clear selection after recategorisation
     setTransactions(transactions.map(tx => selectedTxIds.has(tx.id) ? { ...tx, category: newCategory } : tx));
     setSelectedTxIds(new Set());
     setBulkMode(false);
@@ -3434,7 +3391,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
 
 Provide a short, useful explanation of what this transaction represents in their financial picture.`;
       
-      const result = await callNVIDIA(prompt);
+      const result = await callAIService(prompt);
       let explanation = result.raw || JSON.stringify(result);
       explanation = explanation.replace(/\{[\s\S]*\}/, '').trim() || explanation;
       if (explanation.length > 500) explanation = explanation.substring(0, 500) + "...";
@@ -3453,6 +3410,11 @@ Provide a short, useful explanation of what this transaction represents in their
       setSelectedTxIds(new Set(filtered.map(t => t.id)));
     }
   };
+  
+  // Clear selection when filter changes (UX fix)
+  useEffect(() => {
+    setSelectedTxIds(new Set());
+  }, [activeFilter, search]);
   
   return (
     <div>
