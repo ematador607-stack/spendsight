@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── CURRENCY CONFIG ──────────────────────────────────────────────────────────
 const EXCHANGE_RATES = {
@@ -28,22 +28,18 @@ function formatMoney(amount, currencyCode) {
   return `${c.symbol} ${amount.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// ─── THEME (Phase 2: OKLCH colors) ──────────────────────────────────────────
+// ─── THEME ───────────────────────────────────────────────────────────────────
 const COLORS = {
-  mint: "oklch(0.78 0.18 170)",
-  mintHover: "oklch(0.85 0.20 170)",
-  mintDim: "oklch(0.78 0.18 170 / 0.15)",
-  navy: "oklch(0.18 0.02 260)",
-  navyDeep: "oklch(0.12 0.02 260)",
-  bg: "oklch(0.98 0.01 260)",
-  surface: "oklch(1.00 0.00 0)",
-  text: "oklch(0.25 0.02 260)",
-  textMuted: "oklch(0.55 0.02 260)",
-  border: "oklch(0.90 0.01 260)",
-  danger: "oklch(0.60 0.22 25)",
-  success: "oklch(0.70 0.18 150)",
-  mintHex: "#00C896",
-  dangerHex: "#FF4757",
+  navy: "#1A1A2E",
+  navyDeep: "#0F0F1A",
+  mint: "#00C896",
+  mintDim: "#00C89620",
+  bg: "#F7F9FC",
+  surface: "#FFFFFF",
+  danger: "#FF4757",
+  text: "#2D3748",
+  textMuted: "#718096",
+  border: "#E2E8F0",
 };
 
 const taglines = [
@@ -54,6 +50,7 @@ const taglines = [
   "Every pula tells a story.",
 ];
 
+// Default categories (users can add more)
 const DEFAULT_CATEGORIES = [
   { name: "Groceries",    icon: "🛒", color: "#00C896" },
   { name: "Transport",    icon: "🚗", color: "#4299E1" },
@@ -170,9 +167,66 @@ function parseCSV(csvText) {
   return transactions;
 }
 
-// ─── AI SERVICE (Phase 1: removed hardcoded API key; mock only) ────────────
-async function callAIService(prompt) {
-  await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 400));
+// ─── AI SERVICE ──────────────────────────────────────────────────────────────
+
+// NVIDIA Llama API Configuration
+const NVIDIA_CONFIG = {
+  apiKey: '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',
+  baseURL: 'https://integrate.api.nvidia.com/v1',
+  model: 'meta/llama-3.3-70b-instruct',
+};
+
+async function callNVIDIA(prompt, systemPrompt = null) {
+  try {
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+    messages.push({ role: "user", content: prompt });
+
+    const response = await fetch(`${NVIDIA_CONFIG.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${NVIDIA_CONFIG.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA_CONFIG.model,
+        messages: messages,
+        temperature: 0.2,
+        top_p: 0.7,
+        max_tokens: 1024,
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('NVIDIA API error:', errorText);
+      return getMockResponse(prompt);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.warn('Could not parse AI response as JSON, using raw content');
+    }
+    
+    return { raw: content };
+    
+  } catch (error) {
+    console.error('AI service error:', error);
+    return getMockResponse(prompt);
+  }
+}
+
+function getMockResponse(prompt) {
   if (prompt.includes("financial advisor")) {
     return {
       summary: "Your spending this month is within your income range.",
@@ -191,14 +245,15 @@ async function callAIService(prompt) {
       ]
     };
   }
-  if (prompt.includes("Explain this transaction")) {
-    return { raw: "This transaction appears to be a standard purchase. No specific insights available." };
-  }
-  return { raw: "I'm analyzing your financial data and will provide insights shortly." };
+  return "I'm analyzing your financial data and will provide insights shortly.";
 }
+
 // ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────
+
 function calculateFinancialHealth(transactions, incomes, goals, budgets) {
+  // Check if there's actual data
   const hasData = transactions.length > 0 || incomes.length > 0 || goals.length > 0;
+  
   if (!hasData) {
     return {
       score: 0,
@@ -264,7 +319,7 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     budgetScore = totalBudget > 0 ? (totalSpentBudgeted / totalBudget) * 100 : 100;
     budgetScore = Math.min(100, budgetScore);
   } else {
-    budgetScore = 0;
+    budgetScore = 0; // No budgets = no score
   }
   
   const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
@@ -274,7 +329,7 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     stabilityScore = Math.max(0, 100 - (variance * 100));
     stabilityScore = Math.min(100, stabilityScore);
   } else if (totalSpent > 0 && prevMonthSpent === 0) {
-    stabilityScore = 50;
+    stabilityScore = 50; // First month of data
   } else {
     stabilityScore = 0;
   }
@@ -340,61 +395,60 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   };
 }
 
-// ─── STYLES (Phase 2 & 3: Brutalist, glass, touch targets, animations) ──
-// Mobile touch fixes integrated: touch-action: manipulation, -webkit-appearance: none, pointer-events control
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const css = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --mint: oklch(0.78 0.18 170);
-    --mint-hover: oklch(0.85 0.20 170);
-    --mint-dim: oklch(0.78 0.18 170 / 0.15);
-    --navy: oklch(0.18 0.02 260);
-    --navy-deep: oklch(0.12 0.02 260);
-    --bg: oklch(0.98 0.01 260);
-    --surface: oklch(1.00 0.00 0);
-    --text: oklch(0.25 0.02 260);
-    --muted: oklch(0.55 0.02 260);
-    --border: oklch(0.90 0.01 260);
-    --danger: oklch(0.60 0.22 25);
-    --success: oklch(0.70 0.18 150);
-    --stat-value: var(--text);
-    --greeting-name: var(--navy);
-    --card-bg: var(--surface);
-    --risk-green: oklch(0.70 0.18 150);
-    --risk-yellow: oklch(0.85 0.20 95);
-    --risk-red: var(--danger);
-
-    --font-sans: 'DM Sans', sans-serif;
-    --font-display: 'Syne', sans-serif;
+    --navy: #1A1A2E;
+    --navy-deep: #0F0F1A;
+    --mint: #00C896;
+    --bg: #F7F9FC;
+    --surface: #FFFFFF;
+    --danger: #FF4757;
+    --text: #2D3748;
+    /* was #718096 — measured 4.0:1 against white, fails WCAG AA (needs 4.5:1).
+       #5A6578 measures 5.89:1. See Phase 1 accessibility audit. */
+    --muted: #5A6578;
+    --border: #E2E8F0;
+    --stat-value: #1A1A2E;
+    --greeting-name: #1A1A2E;
+    --card-bg: #FFFFFF;
     --text-scale: 1;
-    --font-size-h1: clamp(1.8rem, 5vw, 2.8rem);
-    --font-size-h2: clamp(1.2rem, 3vw, 1.6rem);
-    --font-size-body: clamp(0.9rem, 2.5vw, 1.0rem);
-    --font-size-small: clamp(0.75rem, 2vw, 0.85rem);
+    --risk-green: #00C896;
+    --risk-yellow: #F6C90E;
+    --risk-red: #FF4757;
 
-    --space-1: 8px;
-    --space-2: 16px;
-    --space-3: 24px;
-    --space-4: 32px;
-    --space-5: 40px;
-    --space-6: 48px;
+    /* z-index tokens — Phase 2 spatial hierarchy. Replaces the ad-hoc
+       100/150/200/400 values that were previously scattered and unordered. */
+    --z-base: 0;
+    --z-sidebar: 10;
+    --z-mobile-overlay: 15;
+    --z-mobile-header: 20;
+    --z-install-banner: 50;
+    --z-modal: 100;
+    --z-toast: 200;
+
+    /* Spring-approximation easing curves (CSS can't do true physics springs,
+       cubic-bezier overshoot is the closest approximation). See Phase 2. */
+    --ease-spring-snappy: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-spring-soft: cubic-bezier(0.22, 1.12, 0.36, 1);
   }
 
   html.dark {
-    --bg: oklch(0.12 0.02 260);
-    --surface: oklch(0.18 0.02 260);
-    --text: oklch(0.92 0.01 260);
-    --muted: oklch(0.70 0.01 260);
-    --border: oklch(0.30 0.02 260);
-    --stat-value: var(--text);
-    --greeting-name: var(--mint);
-    --card-bg: var(--surface);
-    --risk-green: oklch(0.75 0.18 150);
-    --risk-yellow: oklch(0.85 0.20 95);
-    --risk-red: oklch(0.65 0.22 25);
+    --bg: #0F0F1A;
+    --surface: #1A1A2E;
+    --text: #E2E8F0;
+    --muted: #A0AEC0;
+    --border: #2D3748;
+    --stat-value: #E2E8F0;
+    --greeting-name: #00C896;
+    --card-bg: #1A1A2E;
+    --risk-green: #00E0AA;
+    --risk-yellow: #F6C90E;
+    --risk-red: #FF6B7A;
   }
 
   html.text-small { --text-scale: 0.85; }
@@ -403,356 +457,377 @@ const css = `
   html.text-xlarge { --text-scale: 1.3; }
 
   body {
-    font-family: var(--font-sans);
+    font-family: 'DM Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
     transition: background 0.25s, color 0.25s;
     font-size: calc(14px * var(--text-scale));
-    line-height: 1.6;
-    -webkit-tap-highlight-color: transparent;
   }
 
-  /* ---- MOBILE TOUCH FIXES (applied to all interactive elements) ---- */
-  button,
-  input[type="button"],
-  input[type="submit"],
-  input[type="reset"],
-  .nav-item,
-  .filter-chip,
-  .category-pill,
-  .btn-add-income,
-  .tx-menu-btn,
-  .auth-tab,
-  .size-btn,
-  .theme-toggle-btn,
-  .btn-upload,
-  .btn-cancel,
-  .btn-save,
-  .btn-outline,
-  .btn-danger,
-  .btn-primary,
-  .income-delete,
-  .split-remove,
-  .bulk-cancel,
-  .bulk-delete,
-  .bulk-recategorise,
-  .ai-refresh-btn,
-  .credited-toggle,
-  .goal-card .btn-outline,
-  .add-goal-card,
-  .upload-zone,
-  .currency-selector,
-  .settings-select,
-  .modal-input,
-  .search-bar,
-  .form-input {
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-    appearance: none !important;
-    touch-action: manipulation !important;
-    -webkit-tap-highlight-color: transparent !important;
-    cursor: pointer;
-  }
+  input, select, button, textarea { -webkit-appearance: none; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); }
 
-  /* Ensure all buttons get pointer events */
-  button {
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-
-  /* Overlay and sidebar pointer-event control for mobile */
-  .mobile-overlay {
-    display: none;
-    pointer-events: none;
-    position: fixed;
-    inset: 0;
-    background: #00000080;
-    z-index: 150;
-  }
-  .mobile-overlay.open {
-    display: block;
-    pointer-events: auto;
-  }
+  .app { display: flex; min-height: 100vh; }
 
   .sidebar {
-    pointer-events: none;
+    width: 240px; min-height: 100vh; background: var(--navy-deep);
+    display: flex; flex-direction: column; padding: 32px 0;
+    position: fixed; left: 0; top: 0; z-index: var(--z-sidebar);
     transition: transform 0.3s ease;
   }
-  .sidebar.open {
-    pointer-events: auto;
+  .sidebar-logo { padding: 0 24px 32px; border-bottom: 1px solid #ffffff10; }
+  .logo-text { font-family: 'Syne', sans-serif; font-size: calc(22px * var(--text-scale)); font-weight: 800; color: white; letter-spacing: -0.5px; }
+  .logo-dot { color: var(--mint); }
+  .sidebar-nav { flex: 1; padding: 24px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-radius: 10px; cursor: pointer; transition: all 0.2s;
+    color: #ffffff60; font-size: calc(14px * var(--text-scale)); font-weight: 500;
+    border: none; background: none; width: 100%; text-align: left;
   }
-  @media (min-width: 769px) {
-    .sidebar {
-      pointer-events: auto !important;
-    }
+  .nav-item:hover { background: #ffffff10; color: white; }
+  .nav-item.active { background: #00C89615; color: var(--mint); }
+  .nav-item .nav-icon { font-size: calc(18px * var(--text-scale)); width: 24px; text-align: center; }
+  .sidebar-footer { padding: 24px; border-top: 1px solid #ffffff10; }
+  .user-chip { display: flex; align-items: center; gap: 10px; background: #ffffff08; border-radius: 10px; padding: 10px 12px; }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-weight: 700; font-size: calc(13px * var(--text-scale)); color: var(--navy-deep); flex-shrink: 0; }
+  .user-name { color: white; font-size: calc(13px * var(--text-scale)); font-weight: 500; }
+
+  .mobile-header {
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: var(--z-mobile-header);
+    background: var(--navy-deep); padding: 16px 20px;
+    align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #ffffff10; height: 60px;
   }
+  /* was padding: 4px — total hit area ~30px, below the 44px Fitts's Law / WCAG 2.5.5
+     minimum touch target. 12px padding around a 22px icon = 46px hit area. */
+  .hamburger { background: none; border: none; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 12px; }
+  .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; }
+  .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: var(--z-mobile-overlay); pointer-events: none; }
+  .mobile-overlay.open { display: block; pointer-events: all; }
 
-  .main {
-    position: relative;
-    z-index: 1;
-    pointer-events: auto;
+  .main { margin-left: 240px; flex: 1; padding: 40px; min-height: 100vh; background: var(--bg); }
+
+  .install-banner {
+    position: fixed; bottom: 20px; left: 260px; right: 20px; background: var(--navy-deep);
+    border-radius: 12px; padding: 12px 20px; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px; z-index: var(--z-install-banner);
+    border-left: 3px solid var(--mint); box-shadow: 0 4px 12px rgba(0,0,0,0.2);
   }
+  .install-banner p { color: white; font-size: calc(13px * var(--text-scale)); margin: 0; }
+  .install-banner button { padding: 6px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+  .install-btn { background: var(--mint); color: var(--navy-deep); }
+  .dismiss-btn { background: none; color: var(--muted); border: 1px solid var(--border) !important; }
+  @media (max-width: 768px) { .install-banner { left: 20px; } }
 
-  /* ---- END MOBILE TOUCH FIXES ---- */
-
-  .card, .modal, .health-score-card, .ai-advisor-card, .stat-card, .income-banner, .upload-zone {
-    border-radius: 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: var(--space-3);
-    box-shadow: none;
+  .session-overlay {
+    position: fixed; inset: 0; background: var(--navy-deep); z-index: var(--z-modal);
+    display: flex; align-items: center; justify-content: center;
+    background-image: radial-gradient(ellipse at 20% 50%, #00C89610 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%);
   }
+  .session-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; }
+  .session-logo { font-family: 'Syne', sans-serif; font-size: calc(32px * var(--text-scale)); font-weight: 800; color: white; margin-bottom: 24px; }
+  .session-message { color: #ffffffb0; font-size: calc(14px * var(--text-scale)); margin-bottom: 32px; }
+  .session-btn { padding: 14px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 12px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: calc(16px * var(--text-scale)); cursor: pointer; }
 
-  /* Touch targets: min-height 44px (already handled above) */
-  button, .nav-item, .filter-chip, .category-pill, .btn-add-income, .tx-menu-btn,
-  .auth-tab, .size-btn, .theme-toggle-btn, .upload-zone, .btn-upload,
-  .btn-cancel, .btn-save, .btn-outline, .btn-danger, .btn-primary,
-  .income-delete, .split-remove, .bulk-cancel, .bulk-delete, .bulk-recategorise {
-    min-height: 44px;
-    min-width: 44px;
-    display: inline-flex;
+  /* Pre-expiry warning — Phase 1 fix for "session timeout with no warning".
+     Glassmorphism is intentionally used here: this is exactly the kind of
+     transient micro-interaction Phase 2 quarantined it to. */
+  .session-warning-banner {
+    position: fixed; top: 20px; right: 20px; z-index: var(--z-modal);
+    background: rgba(26, 26, 46, 0.75); backdrop-filter: blur(12px);
+    border: 1px solid #ffffff20; border-radius: 14px; padding: 16px 20px;
+    max-width: 340px; box-shadow: 0 8px 32px #00000040;
+    animation: slideUp 0.3s var(--ease-spring-soft);
+  }
+  .session-warning-banner .title { color: white; font-weight: 700; font-size: calc(14px * var(--text-scale)); margin-bottom: 4px; }
+  .session-warning-banner .sub { color: #ffffffa0; font-size: calc(12px * var(--text-scale)); margin-bottom: 12px; }
+  .session-warning-banner button { width: 100%; padding: 10px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: calc(13px * var(--text-scale)); }
+
+  .auth-screen {
+    min-height: 100vh; background: var(--navy-deep);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    background-image: radial-gradient(ellipse at 20% 50%, #00C89610 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%);
+  }
+  .auth-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 420px; box-shadow: 0 40px 80px #00000060; }
+  .auth-logo { text-align: center; margin-bottom: 8px; }
+  .auth-logo-text { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 800; color: white; }
+  .auth-tagline { text-align: center; color: #ffffff50; font-size: calc(13px * var(--text-scale)); margin-bottom: 36px; }
+  .auth-tabs { display: flex; background: #ffffff08; border-radius: 10px; padding: 4px; margin-bottom: 28px; }
+  .auth-tab { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 500; background: none; color: #ffffff50; transition: all 0.2s; }
+  .auth-tab.active { background: var(--mint); color: var(--navy-deep); }
+  .form-group { margin-bottom: 16px; }
+  .form-label { display: block; color: #ffffff70; font-size: calc(12px * var(--text-scale)); font-weight: 500; margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .form-input { width: 100%; padding: 14px 16px; background: #ffffff08; border: 1px solid #ffffff15; border-radius: 10px; color: white; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); outline: none; transition: all 0.2s; }
+  .form-input:focus { border-color: var(--mint); background: #ffffff10; }
+  .form-input::placeholder { color: #ffffff30; }
+  .btn-primary { width: 100%; padding: 15px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; cursor: pointer; margin-top: 8px; transition: all 0.2s; }
+  .btn-primary:hover { background: #00e0aa; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .page-header { margin-bottom: 32px; }
+  .greeting { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 700; color: var(--text); }
+  .greeting-name { color: var(--greeting-name); }
+  .greeting-tagline { color: var(--muted); font-size: calc(15px * var(--text-scale)); margin-top: 4px; }
+
+  .currency-banner {
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 14px;
+    padding: 16px 24px;
+    margin-bottom: 24px;
+    display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 8px 16px;
-    border-radius: 10px;
-    transition: all 0.2s ease;
-    cursor: pointer;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
   }
+  .currency-banner-label { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .currency-banner-value { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
+  .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
 
-  .glass-hover:hover {
-    backdrop-filter: blur(4px);
-    background: var(--mint-dim);
+  .ai-advisor-card {
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
   }
-  .glass-active:active {
-    backdrop-filter: blur(2px);
-    background: var(--mint-dim);
+  .ai-advisor-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
   }
-  .ai-refresh-btn {
-    background: none;
-    border: 1px solid var(--border);
-    transition: all 0.2s;
-  }
-  .ai-refresh-btn:hover {
-    backdrop-filter: blur(4px);
-    background: var(--mint-dim);
-  }
-  .filter-chip.active {
-    backdrop-filter: blur(2px);
-    background: var(--mint);
-    color: var(--navy-deep);
-  }
-  .bulk-add-btn:hover {
-    backdrop-filter: blur(4px);
-    background: var(--mint-dim);
-  }
-
   .ai-advisor-badge {
     background: var(--mint);
     color: var(--navy-deep);
     padding: 2px 12px;
     border-radius: 20px;
-    font-size: var(--font-size-small);
+    font-size: calc(10px * var(--text-scale));
     font-weight: 700;
     text-transform: uppercase;
-    background: oklch(0.78 0.18 170);
-    color: oklch(0.15 0.02 260);
   }
-
-  .health-metric {
-    position: relative;
+  .ai-advisor-status {
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: calc(10px * var(--text-scale));
+    font-weight: 600;
   }
-  .health-metric .tooltip {
-    display: none;
-    font-size: var(--font-size-small);
+  .ai-advisor-status.ready { background: var(--muted); color: white; }
+  .ai-advisor-status.thinking { background: #F6C90E; color: var(--navy-deep); }
+  .ai-advisor-status.live { background: var(--mint); color: var(--navy-deep); }
+  .ai-advisor-status.error { background: var(--danger); color: white; }
+  .ai-advisor-status.offline { background: var(--danger); color: white; }
+  .ai-advisor-summary {
+    font-size: calc(16px * var(--text-scale));
+    font-weight: 600;
     color: var(--text);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 8px 12px;
+    margin-bottom: 8px;
+  }
+  .ai-advisor-opportunity {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .ai-advisor-encouragement {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--mint);
+    font-weight: 500;
+  }
+  .ai-advisor-refresh {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: calc(12px * var(--text-scale));
+    padding: 4px 12px;
     border-radius: 8px;
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: 200px;
-    z-index: 10;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
   }
-  .health-metric:hover .tooltip {
-    display: block;
+  .ai-advisor-refresh:hover { background: var(--bg); }
+
+  .ai-report-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    margin-top: 20px;
+  }
+  .ai-report-content {
+    white-space: pre-wrap;
+    font-size: calc(14px * var(--text-scale));
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .ai-report-loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+  }
+  .ai-report-loading .spinner {
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--border);
+    border-top: 3px solid var(--mint);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  .tx-explanation {
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 8px;
+    border-left: 3px solid var(--mint);
+  }
+  .tx-explanation-text {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .tx-explanation-label {
+    font-size: calc(11px * var(--text-scale));
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
   }
 
-  .budget-fill {
-    transition: width 0.6s ease;
-    background: var(--mint);
-    border-radius: 4px;
+  .health-score-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    margin-bottom: 24px;
   }
-  .budget-fill.stagger {
-    animation: growBar 0.3s ease-out forwards;
-  }
-  @keyframes growBar {
-    from { width: 0%; }
-    to { width: var(--final-width); }
-  }
-
-  @keyframes pulseGold {
-    0% { transform: scale(1); color: var(--mint); }
-    50% { transform: scale(1.15); color: oklch(0.85 0.20 95); }
-    100% { transform: scale(1); color: var(--mint); }
-  }
-  .savings-pulse {
-    animation: pulseGold 0.8s ease;
-  }
-
-  .whatif-slider-container {
-    position: relative;
+  .health-score-main {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: 32px;
+    flex-wrap: wrap;
   }
-  .whatif-slider-tooltip {
-    position: absolute;
-    top: -30px;
-    transform: translateX(-50%);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: var(--font-size-small);
+  .health-score-circle {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: calc(28px * var(--text-scale));
+    color: white;
+    flex-shrink: 0;
+  }
+  .health-score-circle .grade {
+    font-size: calc(14px * var(--text-scale));
+    font-weight: 600;
+    opacity: 0.9;
+  }
+  .health-score-details {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+  }
+  .health-metric {
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: 8px;
+  }
+  .health-metric-label {
+    font-size: calc(10px * var(--text-scale));
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .health-metric-value {
+    font-family: 'Syne', sans-serif;
+    font-size: calc(18px * var(--text-scale));
+    font-weight: 700;
     color: var(--text);
-    pointer-events: none;
-    white-space: nowrap;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    z-index: 5;
+  }
+  .health-metric-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .health-metric-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+  .health-no-data {
+    text-align: center;
+    padding: 20px;
+    color: var(--muted);
   }
 
-  @media (max-width: 768px) {
-    .card, .modal, .health-score-card, .ai-advisor-card, .stat-card, .income-banner {
-      padding: var(--space-2);
-    }
-    .dashboard-grid {
-      grid-template-columns: 1fr !important;
-    }
-    .stats-grid {
-      grid-template-columns: 1fr !important;
-      gap: var(--space-2);
-    }
-    .sidebar {
-      transform: translateX(-100%);
-      pointer-events: none;
-    }
-    .sidebar.open {
-      transform: translateX(0);
-      pointer-events: auto;
-    }
-    .mobile-header {
-      display: flex !important;
-    }
-    .main {
-      margin-left: 0 !important;
-      padding: 80px var(--space-2) var(--space-4) !important;
-    }
-    .filter-chips {
-      flex-wrap: wrap;
-    }
-    .tx-item {
-      flex-wrap: wrap;
-    }
-    .tx-amount {
-      margin-left: auto;
-    }
-    .cat-badge {
-      font-size: var(--font-size-small);
-    }
-    .modal {
-      max-width: 100%;
-      border-radius: 0;
-      padding: var(--space-2);
-    }
-    .whatif-input-group {
-      flex-direction: column;
-    }
-    .income-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-    .health-score-main {
-      flex-direction: column;
-      text-align: center;
-    }
-    .donut-wrap {
-      flex-direction: column;
-    }
-    .bulk-bar {
-      left: 0 !important;
-    }
-    .install-banner {
-      left: 20px !important;
-      right: 20px !important;
-    }
+  .risk-meter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .risk-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .risk-dot.green { background: var(--risk-green); }
+  .risk-dot.yellow { background: var(--risk-yellow); }
+  .risk-dot.red { background: var(--risk-red); }
+  .risk-dot.gray { background: var(--muted); }
+  .risk-label {
+    font-weight: 600;
+    font-size: calc(13px * var(--text-scale));
+  }
+  .risk-factors {
+    font-size: calc(12px * var(--text-scale));
+    color: var(--muted);
   }
 
-  /* --- Original layout styles (kept from your file) --- */
-  .app { display: flex; min-height: 100vh; }
-  .sidebar { width: 240px; min-height: 100vh; background: var(--navy-deep); display: flex; flex-direction: column; padding: 32px 0; position: fixed; left: 0; top: 0; z-index: 100; transition: transform 0.3s ease; }
-  .sidebar-logo { padding: 0 24px 32px; border-bottom: 1px solid #ffffff10; }
-  .logo-text { font-family: var(--font-display); font-size: calc(22px * var(--text-scale)); font-weight: 800; color: white; letter-spacing: -0.5px; }
-  .logo-dot { color: var(--mint); }
-  .sidebar-nav { flex: 1; padding: 24px 12px; display: flex; flex-direction: column; gap: 4px; }
-  .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; cursor: pointer; transition: all 0.2s; color: #ffffff60; font-size: calc(14px * var(--text-scale)); font-weight: 500; border: none; background: none; width: 100%; text-align: left; }
-  .nav-item:hover { background: #ffffff10; color: white; }
-  .nav-item.active { background: var(--mint-dim); color: var(--mint); }
-  .nav-item .nav-icon { font-size: calc(18px * var(--text-scale)); width: 24px; text-align: center; }
-  .sidebar-footer { padding: 24px; border-top: 1px solid #ffffff10; }
-  .user-chip { display: flex; align-items: center; gap: 10px; background: #ffffff08; border-radius: 10px; padding: 10px 12px; }
-  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: calc(13px * var(--text-scale)); color: var(--navy-deep); flex-shrink: 0; }
-  .user-name { color: white; font-size: calc(13px * var(--text-scale)); font-weight: 500; }
+  .insight-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .insight-mini-card {
+    background: var(--bg);
+    padding: 12px 16px;
+    border-radius: 8px;
+    border-left: 3px solid var(--mint);
+  }
+  .insight-mini-card .icon { font-size: calc(18px * var(--text-scale)); margin-right: 8px; }
+  .insight-mini-card .text { font-size: calc(13px * var(--text-scale)); }
 
-  .mobile-header { display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 200; background: var(--navy-deep); padding: 16px 20px; align-items: center; justify-content: space-between; border-bottom: 1px solid #ffffff10; height: 60px; }
-  .hamburger { background: none; border: none; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 4px; touch-action: manipulation; }
-  .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; }
-  .mobile-overlay { display: none; pointer-events: none; position: fixed; inset: 0; background: #00000080; z-index: 150; }
-  .mobile-overlay.open { display: block; pointer-events: auto; }
-
-  .main { margin-left: 240px; flex: 1; padding: 40px; min-height: 100vh; background: var(--bg); position: relative; z-index: 1; pointer-events: auto; }
-
-  .install-banner { position: fixed; bottom: 20px; left: 260px; right: 20px; background: var(--navy-deep); border-radius: 12px; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; z-index: 400; border-left: 3px solid var(--mint); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-  .install-banner p { color: white; font-size: calc(13px * var(--text-scale)); margin: 0; }
-  .install-banner button { padding: 6px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; touch-action: manipulation; }
-  .install-btn { background: var(--mint); color: var(--navy-deep); }
-  .dismiss-btn { background: none; color: var(--muted); border: 1px solid var(--border) !important; }
-
-  .session-overlay { position: fixed; inset: 0; background: var(--navy-deep); z-index: 600; display: flex; align-items: center; justify-content: center; background-image: radial-gradient(ellipse at 20% 50%, var(--mint-dim) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%); }
-  .session-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; }
-  .session-logo { font-family: var(--font-display); font-size: calc(32px * var(--text-scale)); font-weight: 800; color: white; margin-bottom: 24px; }
-  .session-message { color: #ffffffb0; font-size: calc(14px * var(--text-scale)); margin-bottom: 32px; }
-  .session-btn { padding: 14px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 12px; font-family: var(--font-display); font-weight: 700; font-size: calc(16px * var(--text-scale)); cursor: pointer; touch-action: manipulation; }
-
-  .auth-screen { min-height: 100vh; background: var(--navy-deep); display: flex; align-items: center; justify-content: center; padding: 20px; background-image: radial-gradient(ellipse at 20% 50%, var(--mint-dim) 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%); }
-  .auth-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 420px; box-shadow: 0 40px 80px #00000060; }
-  .auth-logo { text-align: center; margin-bottom: 8px; }
-  .auth-logo-text { font-family: var(--font-display); font-size: calc(28px * var(--text-scale)); font-weight: 800; color: white; }
-  .auth-tagline { text-align: center; color: #ffffff50; font-size: calc(13px * var(--text-scale)); margin-bottom: 36px; }
-  .auth-tabs { display: flex; background: #ffffff08; border-radius: 10px; padding: 4px; margin-bottom: 28px; }
-  .auth-tab { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-family: var(--font-sans); font-size: calc(14px * var(--text-scale)); font-weight: 500; background: none; color: #ffffff50; transition: all 0.2s; touch-action: manipulation; }
-  .auth-tab.active { background: var(--mint); color: var(--navy-deep); }
-  .form-group { margin-bottom: 16px; }
-  .form-label { display: block; color: #ffffff70; font-size: calc(12px * var(--text-scale)); font-weight: 500; margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase; }
-  .form-input { width: 100%; padding: 14px 16px; background: #ffffff08; border: 1px solid #ffffff15; border-radius: 10px; color: white; font-family: var(--font-sans); font-size: calc(14px * var(--text-scale)); outline: none; transition: all 0.2s; -webkit-appearance: none; appearance: none; }
-  .form-input:focus { border-color: var(--mint); background: #ffffff10; }
-  .form-input::placeholder { color: #ffffff30; }
-  .btn-primary { width: 100%; padding: 15px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: var(--font-display); font-size: calc(15px * var(--text-scale)); font-weight: 700; cursor: pointer; margin-top: 8px; transition: all 0.2s; touch-action: manipulation; }
-  .btn-primary:hover { background: var(--mint-hover); transform: translateY(-1px); }
-  .btn-primary:active { transform: translateY(0); }
-
-  .page-header { margin-bottom: 32px; }
-  .greeting { font-family: var(--font-display); font-size: var(--font-size-h1); font-weight: 700; color: var(--text); }
-  .greeting-name { color: var(--greeting-name); }
-  .greeting-tagline { color: var(--muted); font-size: var(--font-size-body); margin-top: 4px; }
-
-  .currency-banner { background: linear-gradient(135deg, var(--mint-dim), var(--surface)); border: 1px solid var(--mint); border-radius: 14px; padding: 16px 24px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-  .currency-banner-label { font-size: var(--font-size-small); color: var(--muted); }
-  .currency-banner-value { font-family: var(--font-display); font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
-  .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: calc(14px * var(--text-scale)); cursor: pointer; touch-action: manipulation; }
+  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
+  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+  .income-title { font-family: 'Syne', sans-serif; font-size: calc(16px * var(--text-scale)); font-weight: 700; color: var(--text); }
+  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; }
+  .income-total { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 800; color: var(--mint); margin-bottom: 12px; }
+  .income-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .income-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: calc(13px * var(--text-scale)); }
+  .income-type-badge { background: var(--mint)20; color: var(--mint); padding: 2px 8px; border-radius: 20px; font-size: calc(11px * var(--text-scale)); font-weight: 600; }
+  .income-amount { font-weight: 600; color: var(--mint); }
+  .income-delete { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(14px * var(--text-scale)); padding: 0 4px; }
+  .credited-section { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .credited-toggle { background: none; border: none; color: var(--mint); font-size: calc(12px * var(--text-scale)); cursor: pointer; display: flex; align-items: center; gap: 4px; }
 
   .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
   .stat-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); position: relative; overflow: hidden; transition: transform 0.2s; }
@@ -761,47 +836,83 @@ const css = `
   .stat-card.spent::after { background: var(--danger); }
   .stat-card.free::after { background: var(--mint); }
   .stat-card.savings::after { background: #F6C90E; }
-  .stat-label { font-size: var(--font-size-small); font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .stat-label { font-size: calc(12px * var(--text-scale)); font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
   .stat-label small { font-size: calc(10px * var(--text-scale)); text-transform: none; font-weight: normal; color: var(--muted); }
-  .stat-value { font-family: var(--font-display); font-size: var(--font-size-h1); font-weight: 700; color: var(--stat-value); }
-  .stat-sub { font-size: var(--font-size-small); color: var(--muted); margin-top: 6px; }
+  .stat-value { font-family: 'Fraunces', serif; font-size: calc(28px * var(--text-scale)); font-weight: 600; color: var(--stat-value); }
+  .stat-sub { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 6px; }
 
   .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
   .card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
-  .card-title { font-family: var(--font-display); font-size: var(--font-size-h2); font-weight: 700; color: var(--text); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .card-title { font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 
   .budget-item { margin-bottom: 16px; }
-  .budget-header { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: var(--font-size-body); }
+  .budget-header { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: calc(13px * var(--text-scale)); }
   .budget-name { font-weight: 500; color: var(--text); }
   .budget-amount { color: var(--muted); }
   .budget-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
-  .budget-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
-  .budget-warning { margin-top: 4px; font-size: var(--font-size-small); color: var(--danger); }
+  .budget-fill { height: 100%; border-radius: 4px; transition: width 0.5s var(--ease-spring-soft); }
+  .budget-warning { margin-top: 4px; font-size: calc(11px * var(--text-scale)); color: var(--danger); }
 
-  .donut-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .donut-wrap { display: flex; align-items: center; gap: 24px; }
   .donut-svg { flex-shrink: 0; }
   .donut-legend { display: flex; flex-direction: column; gap: 10px; flex: 1; }
-  .legend-item { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-body); }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: calc(13px * var(--text-scale)); }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .legend-name { color: var(--muted); flex: 1; }
-  .legend-val { font-weight: 600; color: var(--text); font-size: var(--font-size-small); }
+  .legend-val { font-weight: 600; color: var(--text); font-size: calc(12px * var(--text-scale)); }
 
-  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
-  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
-  .income-title { font-family: var(--font-display); font-size: var(--font-size-h2); font-weight: 700; color: var(--text); }
-  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; touch-action: manipulation; }
-  .income-total { font-family: var(--font-display); font-size: var(--font-size-h1); font-weight: 800; color: var(--mint); margin-bottom: 12px; }
-  .income-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-  .income-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: var(--font-size-body); }
-  .income-type-badge { background: var(--mint-dim); color: var(--mint); padding: 2px 8px; border-radius: 20px; font-size: var(--font-size-small); font-weight: 600; }
-  .income-amount { font-weight: 600; color: var(--mint); }
-  .income-delete { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(14px * var(--text-scale)); padding: 0 4px; touch-action: manipulation; }
-  .credited-section { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-  .credited-toggle { background: none; border: none; color: var(--mint); font-size: var(--font-size-small); cursor: pointer; display: flex; align-items: center; gap: 4px; touch-action: manipulation; }
+  .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-bottom: 24px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bar { width: 100%; border-radius: 6px 6px 0 0; background: var(--mint); opacity: 0.3; min-height: 4px; }
+  .bar.active { opacity: 1; }
+  .bar-label { font-size: calc(11px * var(--text-scale)); color: var(--muted); }
+
+  .timing-bar-chart { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+  .timing-bar-row { display: flex; align-items: center; gap: 12px; }
+  .timing-bar-label { width: 80px; font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .timing-bar-bg { flex: 1; height: 24px; background: var(--border); border-radius: 12px; overflow: hidden; }
+  .timing-bar-fill { height: 100%; background: var(--mint); border-radius: 12px; transition: width 0.3s; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; color: var(--navy-deep); font-size: calc(10px * var(--text-scale)); font-weight: 600; }
+
+  .empty-state { text-align: center; padding: 40px 20px; }
+  .empty-icon { font-size: calc(40px * var(--text-scale)); margin-bottom: 12px; opacity: 0.5; }
+  .empty-text { color: var(--muted); font-size: calc(14px * var(--text-scale)); }
+  .empty-sub { color: var(--muted); font-size: calc(12px * var(--text-scale)); margin-top: 6px; opacity: 0.7; }
+
+  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 16px; }
+  .calendar-day-header { text-align: center; font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); padding: 8px; }
+  .calendar-day { min-height: 80px; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: var(--bg); }
+  .calendar-day-num { font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .calendar-tx { font-size: calc(10px * var(--text-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 4px; border-radius: 4px; margin-bottom: 2px; cursor: pointer; }
+  .calendar-tx.debit { background: var(--danger)20; color: var(--danger); }
+  .calendar-tx.credit { background: var(--mint)20; color: var(--mint); }
 
   .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-  .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: var(--font-size-small); font-weight: 500; cursor: pointer; background: var(--bg); border: 1px solid var(--border); color: var(--text); touch-action: manipulation; }
+  .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: calc(12px * var(--text-scale)); font-weight: 500; cursor: pointer; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
   .filter-chip.active { background: var(--mint); border-color: var(--mint); color: var(--navy-deep); }
+
+  .tx-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+    flex-shrink: 0;
+  }
+  .tx-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--mint);
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    appearance: checkbox;
+    -webkit-appearance: checkbox;
+    -moz-appearance: checkbox;
+  }
+  .tx-checkbox input[type="checkbox"]:checked {
+    accent-color: var(--mint);
+    background: var(--mint);
+  }
 
   .tx-list { display: flex; flex-direction: column; }
   .tx-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); position: relative; }
@@ -809,152 +920,212 @@ const css = `
   .tx-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .tx-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: calc(16px * var(--text-scale)); flex-shrink: 0; }
   .tx-info { flex: 1; min-width: 0; }
-  .tx-name { font-size: var(--font-size-body); font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tx-name { font-size: calc(14px * var(--text-scale)); font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .tx-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tx-notes-icon { font-size: var(--font-size-small); color: var(--mint); cursor: help; }
-  .tx-date { font-size: var(--font-size-small); color: var(--muted); margin-top: 2px; }
-  .tx-amount { font-family: var(--font-display); font-size: var(--font-size-body); font-weight: 700; white-space: nowrap; }
+  .tx-notes-icon { font-size: calc(12px * var(--text-scale)); color: var(--mint); cursor: help; }
+  .tx-date { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 2px; }
+  .tx-amount { font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; white-space: nowrap; }
   .tx-amount.debit { color: var(--danger); }
   .tx-amount.credit { color: var(--mint); }
-  .cat-badge { font-size: var(--font-size-small); padding: 3px 8px; border-radius: 20px; font-weight: 500; white-space: nowrap; }
+  .cat-badge { font-size: calc(11px * var(--text-scale)); padding: 3px 8px; border-radius: 20px; font-weight: 500; white-space: nowrap; }
   .tx-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-  .tx-tag { background: var(--mint-dim); color: var(--mint); padding: 2px 8px; border-radius: 12px; font-size: calc(10px * var(--text-scale)); font-weight: 500; }
-  .split-badge { background: var(--mint-dim); color: var(--mint); padding: 2px 6px; border-radius: 4px; font-size: calc(9px * var(--text-scale)); font-weight: 600; margin-left: 6px; }
+  .tx-tag { background: var(--mint)20; color: var(--mint); padding: 2px 8px; border-radius: 12px; font-size: calc(10px * var(--text-scale)); font-weight: 500; }
+  .split-badge { background: var(--mint)20; color: var(--mint); padding: 2px 6px; border-radius: 4px; font-size: calc(9px * var(--text-scale)); font-weight: 600; margin-left: 6px; }
   .tx-menu { position: relative; flex-shrink: 0; }
-  .tx-menu-btn { background: none; border: none; color: var(--muted); font-size: calc(18px * var(--text-scale)); cursor: pointer; padding: 4px 8px; border-radius: 6px; touch-action: manipulation; }
+  .tx-menu-btn { background: none; border: none; color: var(--muted); font-size: calc(18px * var(--text-scale)); cursor: pointer; padding: 4px 8px; border-radius: 6px; }
   .tx-menu-btn:hover { background: var(--border); color: var(--text); }
   .tx-dropdown { position: absolute; right: 0; top: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10; min-width: 140px; }
-  .tx-dropdown button { display: block; width: 100%; text-align: left; padding: 8px 12px; background: none; border: none; font-size: var(--font-size-body); color: var(--text); cursor: pointer; touch-action: manipulation; }
+  .tx-dropdown button { display: block; width: 100%; text-align: left; padding: 8px 12px; background: none; border: none; font-size: calc(13px * var(--text-scale)); color: var(--text); cursor: pointer; }
   .tx-dropdown button:hover { background: var(--bg); }
   .split-row { margin-left: 50px; padding: 8px 0 8px 12px; border-left: 2px solid var(--mint); margin-top: -4px; margin-bottom: 4px; background: var(--bg); border-radius: 0 8px 8px 0; }
-  .split-details { font-size: var(--font-size-small); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .split-details { font-size: calc(12px * var(--text-scale)); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
 
   .bulk-bar { position: fixed; bottom: 0; left: 240px; right: 0; background: var(--navy-deep); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 400; border-top: 1px solid var(--mint); flex-wrap: wrap; gap: 12px; }
-  .bulk-bar .selected-count { color: white; font-size: var(--font-size-body); }
+  .bulk-bar .selected-count { color: white; font-size: calc(14px * var(--text-scale)); }
   .bulk-bar .bulk-actions { display: flex; gap: 12px; }
-  .bulk-bar .bulk-actions button { padding: 8px 16px; border-radius: 8px; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; border: none; touch-action: manipulation; }
+  .bulk-bar .bulk-actions button { padding: 8px 16px; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; border: none; }
   .bulk-recategorise { background: var(--mint); color: var(--navy-deep); }
   .bulk-delete { background: var(--danger); color: white; }
   .bulk-cancel { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  @media (max-width: 768px) { .bulk-bar { left: 0; } }
 
-  .upload-zone { border: 2px dashed var(--border); border-radius: 20px; padding: 60px 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: var(--surface); margin-bottom: 24px; touch-action: manipulation; }
-  .upload-zone:hover, .upload-zone.dragover { border-color: var(--mint); background: var(--mint-dim); }
+  .upload-zone { border: 2px dashed var(--border); border-radius: 20px; padding: 60px 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: var(--surface); margin-bottom: 24px; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: var(--mint); background: #00C89608; }
   .upload-icon { font-size: calc(48px * var(--text-scale)); margin-bottom: 16px; }
-  .upload-title { font-family: var(--font-display); font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 8px; }
-  .upload-sub { color: var(--muted); font-size: var(--font-size-body); margin-bottom: 24px; }
-  .btn-upload { display: inline-block; padding: 12px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: var(--font-display); font-size: calc(14px * var(--text-scale)); font-weight: 700; cursor: pointer; touch-action: manipulation; }
+  .upload-title { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .upload-sub { color: var(--muted); font-size: calc(14px * var(--text-scale)); margin-bottom: 24px; }
+  .btn-upload { display: inline-block; padding: 12px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; cursor: pointer; }
 
   .upload-history { margin-top: 16px; }
-  .history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: var(--font-size-small); }
+  .history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: calc(12px * var(--text-scale)); }
 
   .goals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
   .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
   .goal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .goal-name { font-family: var(--font-display); font-size: var(--font-size-h2); font-weight: 700; color: var(--text); }
+  .goal-name { font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; color: var(--text); }
   .goal-emoji { font-size: calc(24px * var(--text-scale)); }
   .goal-amounts { display: flex; justify-content: space-between; margin-bottom: 10px; align-items: flex-end; }
-  .goal-saved { font-family: var(--font-display); font-size: calc(18px * var(--text-scale)); font-weight: 700; color: var(--stat-value); }
-  .goal-target { font-size: var(--font-size-body); color: var(--muted); }
+  .goal-saved { font-family: 'Syne', sans-serif; font-size: calc(18px * var(--text-scale)); font-weight: 700; color: var(--stat-value); }
+  .goal-target { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
   .progress-fill { height: 100%; background: var(--mint); border-radius: 3px; transition: width 0.6s ease; }
-  .goal-meta { font-size: var(--font-size-small); color: var(--muted); }
-  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; width: 100%; touch-action: manipulation; }
-  .add-goal-card:hover { border-color: var(--mint); background: var(--mint-dim); }
+  .goal-meta { font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; width: 100%; }
+  .add-goal-card:hover { border-color: var(--mint); background: #00C89608; }
   .add-goal-icon { font-size: calc(28px * var(--text-scale)); color: var(--muted); }
-  .add-goal-text { font-size: var(--font-size-body); color: var(--muted); font-weight: 500; }
+  .add-goal-text { font-size: calc(14px * var(--text-scale)); color: var(--muted); font-weight: 500; }
 
-  .insight-card { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-deep) 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; border: 1px solid #ffffff10; position: relative; overflow: hidden; }
+  .insight-card { background: linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; border: 1px solid #ffffff10; position: relative; overflow: hidden; }
   .insight-card::before { content: '💡'; position: absolute; right: 24px; top: 50%; transform: translateY(-50%); font-size: calc(48px * var(--text-scale)); opacity: 0.15; }
-  .insight-label { font-size: var(--font-size-small); color: var(--mint); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-  .insight-text { font-size: var(--font-size-body); font-weight: 500; line-height: 1.5; max-width: 80%; color: white; }
+  .insight-label { font-size: calc(11px * var(--text-scale)); color: var(--mint); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .insight-text { font-size: calc(16px * var(--text-scale)); font-weight: 500; line-height: 1.5; max-width: 80%; color: white; }
 
   .whatif-scenario { margin-bottom: 32px; padding: 20px; background: var(--bg); border-radius: 16px; border: 1px solid var(--border); }
-  .whatif-title { font-family: var(--font-display); font-size: var(--font-size-h2); font-weight: 700; color: var(--text); margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .whatif-title { font-family: 'Syne', sans-serif; font-size: calc(16px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
   .whatif-input-group { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
   .whatif-field { flex: 1; min-width: 120px; }
-  .whatif-field label { display: block; font-size: var(--font-size-small); font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-  .whatif-field input, .whatif-field select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: var(--font-size-body); -webkit-appearance: none; appearance: none; }
+  .whatif-field label { display: block; font-size: calc(11px * var(--text-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .whatif-field input, .whatif-field select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: calc(13px * var(--text-scale)); }
   .whatif-output { margin-top: 16px; padding: 16px; background: var(--surface); border-radius: 12px; border-left: 3px solid var(--mint); }
-  .whatif-output-text { font-size: var(--font-size-body); color: var(--text); }
-  .whatif-output-value { font-family: var(--font-display); font-size: calc(20px * var(--text-scale)); font-weight: 800; color: var(--mint); }
+  .whatif-output-text { font-size: calc(14px * var(--text-scale)); color: var(--text); }
+  .whatif-output-value { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 800; color: var(--mint); }
   .custom-scenario-card { background: var(--surface); border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--border); }
   .custom-scenario-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .custom-scenario-text { font-size: var(--font-size-body); color: var(--text); }
-  .custom-scenario-output { font-family: var(--font-display); font-size: calc(18px * var(--text-scale)); font-weight: 800; color: var(--mint); margin-top: 8px; }
-  .delete-scenario { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); padding: 4px; touch-action: manipulation; }
+  .custom-scenario-text { font-size: calc(14px * var(--text-scale)); color: var(--text); }
+  .custom-scenario-output { font-family: 'Syne', sans-serif; font-size: calc(18px * var(--text-scale)); font-weight: 800; color: var(--mint); margin-top: 8px; }
+  .delete-scenario { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); padding: 4px; }
 
   .settings-section { margin-bottom: 32px; }
-  .settings-title { font-family: var(--font-display); font-size: var(--font-size-small); font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  .settings-title { font-family: 'Syne', sans-serif; font-size: calc(13px * var(--text-scale)); font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
   .settings-card { background: var(--surface); border-radius: 16px; border: 1px solid var(--border); overflow: hidden; }
   .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
   .settings-row:last-child { border-bottom: none; }
-  .settings-row-label { font-size: var(--font-size-body); color: var(--text); font-weight: 500; }
-  .settings-row-sub { font-size: var(--font-size-small); color: var(--muted); margin-top: 2px; }
-  .settings-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: var(--font-sans); font-size: var(--font-size-body); color: var(--text); background: var(--bg); outline: none; cursor: pointer; touch-action: manipulation; -webkit-appearance: none; appearance: none; }
-  .btn-danger { padding: 8px 16px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+  .settings-row-label { font-size: calc(14px * var(--text-scale)); color: var(--text); font-weight: 500; }
+  .settings-row-sub { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 2px; }
+  .settings-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: calc(13px * var(--text-scale)); color: var(--text); background: var(--bg); outline: none; cursor: pointer; }
+  .btn-danger { padding: 8px 16px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { opacity: 0.85; }
-  .btn-outline { padding: 8px 16px; background: none; color: var(--mint); border: 1px solid var(--mint); border-radius: 8px; font-size: var(--font-size-body); font-weight: 600; cursor: pointer; white-space: nowrap; touch-action: manipulation; }
+  .btn-outline { padding: 8px 16px; background: none; color: var(--mint); border: 1px solid var(--mint); border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; white-space: nowrap; }
   .btn-outline:hover { background: var(--mint); color: var(--navy-deep); }
 
   .theme-toggle { display: flex; align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px; gap: 2px; cursor: pointer; }
-  .theme-toggle-btn { padding: 6px 14px; border-radius: 16px; border: none; cursor: pointer; font-size: var(--font-size-body); font-weight: 500; transition: all 0.2s; background: none; color: var(--muted); touch-action: manipulation; }
+  .theme-toggle-btn { padding: 6px 14px; border-radius: 16px; border: none; cursor: pointer; font-size: calc(13px * var(--text-scale)); font-weight: 500; transition: all 0.2s; background: none; color: var(--muted); }
   .theme-toggle-btn.active { background: var(--mint); color: var(--navy-deep); font-weight: 700; }
 
   .text-size-selector { display: flex; gap: 8px; }
-  .size-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-size: var(--font-size-body); touch-action: manipulation; }
+  .size-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-size: calc(13px * var(--text-scale)); }
   .size-btn.active { background: var(--mint); color: var(--navy-deep); border-color: var(--mint); }
 
-  .modal-overlay { position: fixed; inset: 0; background: #00000070; z-index: 500; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay { position: fixed; inset: 0; background: #00000070; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; padding: 20px; }
   .modal { background: var(--surface); border-radius: 20px; padding: 32px; width: 100%; max-width: 500px; box-shadow: 0 40px 80px #00000030; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border); }
-  .modal-title { font-family: var(--font-display); font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 24px; }
-  .modal-input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-family: var(--font-sans); font-size: var(--font-size-body); color: var(--text); background: var(--bg); outline: none; transition: border-color 0.2s; -webkit-appearance: none; appearance: none; }
+  .modal-title { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 24px; }
+  .modal-input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); color: var(--text); background: var(--bg); outline: none; transition: border-color 0.2s; }
   .modal-input:focus { border-color: var(--mint); }
-  .modal-label { display: block; font-size: var(--font-size-small); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; margin-top: 16px; }
+  .modal-label { display: block; font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; margin-top: 16px; }
   .modal-actions { display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end; }
-  .btn-cancel { padding: 12px 20px; background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px; font-family: var(--font-sans); font-size: var(--font-size-body); cursor: pointer; touch-action: manipulation; }
-  .btn-save { padding: 12px 24px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: var(--font-display); font-size: var(--font-size-body); font-weight: 700; cursor: pointer; touch-action: manipulation; }
-  .btn-save:hover { background: var(--mint-hover); }
+  .btn-cancel { padding: 12px 20px; background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
+  .btn-save { padding: 12px 24px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; cursor: pointer; }
+  .btn-save:hover { background: #00e0aa; }
 
   .category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-bottom: 16px; }
-  .category-pill { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 30px; font-size: var(--font-size-body); font-weight: 500; cursor: pointer; transition: all 0.2s; background: var(--bg); border: 1px solid var(--border); color: var(--text); touch-action: manipulation; }
-  .category-pill.active { border-color: var(--mint); background: var(--mint-dim); }
+  .category-pill { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 30px; font-size: calc(13px * var(--text-scale)); font-weight: 500; cursor: pointer; transition: all 0.2s; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+  .category-pill.active { border-color: var(--mint); background: var(--mint)20; }
   .category-pill:hover { transform: scale(0.98); }
 
   .tags-input { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: var(--bg); }
-  .tag-chip { background: var(--mint-dim); color: var(--mint); padding: 4px 8px; border-radius: 16px; font-size: var(--font-size-small); display: inline-flex; align-items: center; gap: 6px; }
-  .tag-chip button { background: none; border: none; color: var(--mint); cursor: pointer; font-size: var(--font-size-small); padding: 0 2px; touch-action: manipulation; }
-  .tags-input-field { border: none; background: none; padding: 4px; flex: 1; min-width: 80px; outline: none; color: var(--text); font-size: var(--font-size-body); -webkit-appearance: none; appearance: none; }
+  .tag-chip { background: var(--mint)20; color: var(--mint); padding: 4px 8px; border-radius: 16px; font-size: calc(12px * var(--text-scale)); display: inline-flex; align-items: center; gap: 6px; }
+  .tag-chip button { background: none; border: none; color: var(--mint); cursor: pointer; font-size: calc(12px * var(--text-scale)); padding: 0 2px; }
+  .tags-input-field { border: none; background: none; padding: 4px; flex: 1; min-width: 80px; outline: none; color: var(--text); font-size: calc(13px * var(--text-scale)); }
 
   .split-line { background: var(--bg); border-radius: 12px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); }
   .split-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .split-title { font-size: var(--font-size-body); font-weight: 600; color: var(--muted); }
-  .split-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); touch-action: manipulation; }
+  .split-title { font-size: calc(13px * var(--text-scale)); font-weight: 600; color: var(--muted); }
+  .split-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); }
   .split-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .split-fields input, .split-fields select { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: var(--font-size-body); -webkit-appearance: none; appearance: none; }
-  .split-total { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: var(--font-size-body); }
+  .split-fields input, .split-fields select { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: calc(13px * var(--text-scale)); }
+  .split-total { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: calc(14px * var(--text-scale)); }
   .split-remainder { color: var(--mint); font-weight: 600; }
 
   .search-wrap { position: relative; margin-bottom: 20px; }
-  .search-bar { width: 100%; padding: 12px 16px 12px 40px; border: 1px solid var(--border); border-radius: 10px; font-family: var(--font-sans); font-size: var(--font-size-body); background: var(--surface); outline: none; color: var(--text); transition: border-color 0.2s; -webkit-appearance: none; appearance: none; }
+  .search-bar { width: 100%; padding: 12px 16px 12px 40px; border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); background: var(--surface); outline: none; color: var(--text); transition: border-color 0.2s; }
   .search-bar:focus { border-color: var(--mint); }
-  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: var(--font-size-body); pointer-events: none; }
+  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: calc(14px * var(--text-scale)); pointer-events: none; }
 
   .sub-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .sub-item:last-child { border-bottom: none; }
-  .sub-name { font-size: var(--font-size-body); font-weight: 500; color: var(--text); }
-  .sub-freq { font-size: var(--font-size-small); color: var(--muted); }
-  .sub-amount { font-family: var(--font-display); font-size: var(--font-size-body); font-weight: 700; color: var(--danger); }
+  .sub-name { font-size: calc(14px * var(--text-scale)); font-weight: 500; color: var(--text); }
+  .sub-freq { font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .sub-amount { font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; color: var(--danger); }
 
-  .contact-links { display: flex; gap: 16px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+  .contact-links { display: flex; gap: 16px; justify-content: center; margin-top: 20px; }
   .contact-card { background: var(--bg); border-radius: 12px; padding: 20px; text-align: center; flex: 1; border: 1px solid var(--border); }
   .contact-icon { font-size: calc(40px * var(--text-scale)); margin-bottom: 12px; }
   .contact-title { font-weight: 700; margin-bottom: 8px; }
-  .whatsapp-link { display: inline-block; margin-top: 12px; padding: 8px 20px; background: #25D366; color: white; border-radius: 30px; text-decoration: none; font-weight: 600; touch-action: manipulation; }
+  .whatsapp-link { display: inline-block; margin-top: 12px; padding: 8px 20px; background: #25D366; color: white; border-radius: 30px; text-decoration: none; font-weight: 600; }
 
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy-deep); color: white; padding: 14px 20px; border-radius: 12px; font-size: var(--font-size-body); border-left: 3px solid var(--mint); box-shadow: 0 8px 24px #00000030; z-index: 999; animation: slideUp 0.3s ease; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy-deep); color: white; padding: 14px 20px; border-radius: 12px; font-size: calc(14px * var(--text-scale)); border-left: 3px solid var(--mint); box-shadow: 0 8px 24px #00000030; z-index: var(--z-toast); animation: slideUp 0.3s var(--ease-spring-soft); }
+
+  /* Destructive-confirm modal — Phase 1 fix replacing window.confirm() for
+     "Clear All Data". Type-to-confirm is the real friction this needs;
+     a single native OK click was not enough for permanent data loss. */
+  .destructive-modal { background: var(--card-bg); border-radius: 16px; padding: 28px; width: 100%; max-width: 420px; border: 1px solid var(--border); }
+  .destructive-modal .icon { font-size: 32px; margin-bottom: 12px; }
+  .destructive-modal .title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: calc(18px * var(--text-scale)); color: var(--text); margin-bottom: 8px; }
+  .destructive-modal .body { color: var(--muted); font-size: calc(13px * var(--text-scale)); margin-bottom: 16px; line-height: 1.5; }
+  .destructive-modal .confirm-input { width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 10px; font-size: calc(14px * var(--text-scale)); margin-bottom: 16px; color: var(--text); background: var(--surface); }
+  .destructive-modal .confirm-input.shake { animation: shake 0.4s; border-color: var(--danger); }
+  .destructive-modal .actions { display: flex; gap: 10px; }
+  .destructive-modal .actions button { flex: 1; padding: 12px; border-radius: 10px; font-weight: 600; font-size: calc(13px * var(--text-scale)); cursor: pointer; border: none; }
+  .destructive-modal .btn-cancel-d { background: var(--bg); color: var(--text); }
+  .destructive-modal .btn-confirm-d { background: var(--danger); color: white; transition: opacity 0.2s; }
+  .destructive-modal .btn-confirm-d:disabled { opacity: 0.4; cursor: not-allowed; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+
+  /* Dashboard: Zeigarnik "open loop" nudge card and Goal-Gradient goal card — Phase 1/3 */
+  .nudge-card { background: linear-gradient(135deg, #00C89612, #00C89605); border: 1px solid #00C89630; border-radius: 14px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; transition: all 0.3s var(--ease-spring-soft); overflow: hidden; }
+  .nudge-card.resolved { max-height: 0; padding: 0 16px; opacity: 0; margin: 0; border-width: 0; }
+  .nudge-card .nudge-text { font-size: calc(13px * var(--text-scale)); color: var(--text); font-weight: 500; }
+  .nudge-card .nudge-count { font-family: 'Fraunces', serif; font-weight: 600; color: var(--mint); }
+  .nudge-card button { background: var(--mint); color: var(--navy-deep); border: none; padding: 8px 14px; border-radius: 8px; font-weight: 700; font-size: calc(12px * var(--text-scale)); cursor: pointer; white-space: nowrap; }
+
+  .dash-goal-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 10px; }
+  .dash-goal-card .goal-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .dash-goal-card .goal-name { font-size: calc(14px * var(--text-scale)); font-weight: 600; color: var(--text); }
+  .dash-goal-card .goal-pct { font-family: 'Fraunces', serif; font-weight: 700; font-size: calc(18px * var(--text-scale)); color: var(--mint); }
+  .dash-goal-card .goal-bar-track { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .dash-goal-card .goal-bar-fill { height: 100%; background: var(--mint); border-radius: 4px; transition: width 0.6s var(--ease-spring-snappy); }
+  .dash-goal-card .goal-sub { font-size: calc(11px * var(--text-scale)); color: var(--muted); margin-top: 6px; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  @media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); z-index: 300; pointer-events: none; }
+    .sidebar.open { transform: translateX(0); pointer-events: all; }
+    .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 250; pointer-events: none; }
+    .mobile-overlay.open { display: block; pointer-events: all; }
+    .mobile-header { display: flex !important; z-index: 200; }
+    .app { display: block !important; }
+    .main { margin-left: 0 !important; padding: 80px 16px 32px !important; width: 100vw !important; position: relative !important; z-index: 1 !important; pointer-events: all !important; }
+    .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
+    .dashboard-grid { grid-template-columns: 1fr !important; }
+    .goals-grid { grid-template-columns: 1fr !important; }
+    .auth-card { padding: 32px 24px; }
+    .donut-wrap { flex-direction: column; }
+    .greeting { font-size: calc(22px * var(--text-scale)) !important; }
+    .stat-value { font-size: calc(22px * var(--text-scale)) !important; }
+    .income-banner { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .settings-row { flex-wrap: wrap; }
+    .split-fields { grid-template-columns: 1fr; }
+    .whatif-input-group { flex-direction: column; }
+    .calendar-grid { font-size: calc(10px * var(--text-scale)); }
+    .calendar-day { min-height: 60px; }
+    .contact-links { flex-direction: column; }
+    .health-score-main { flex-direction: column; text-align: center; }
+    .health-score-details { grid-template-columns: 1fr 1fr; }
+  }
 `;
+
+// ─── COMPONENTS ──────────────────────────────────────────────────────────────
+
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
 function DonutChart({ data, currency }) {
   if (!data || data.length === 0) {
@@ -1030,7 +1201,7 @@ function BarChart({ data }) {
   );
 }
 
-// ─── AI ADVISOR (Phase 1: mock, Phase 2: redesigned) ──────────────────────
+// ─── AI ADVISOR COMPONENT ──────────────────────────────────────────────────
 function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [loading, setLoading] = useState(false);
   const [advice, setAdvice] = useState(null);
@@ -1071,7 +1242,7 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
     return spent > b.amount;
   }).map(b => b.category);
   
-  const generateAdvice = useCallback(async () => {
+  const generateAdvice = async () => {
     if (transactions.length === 0) {
       setAiStatus("offline");
       setAdvice({
@@ -1102,7 +1273,7 @@ Return a JSON object with exactly these keys:
   "encouragement": "A brief encouraging message"
 }`;
 
-      const result = await callAIService(prompt);
+      const result = await callNVIDIA(prompt);
       
       let parsedResult = result;
       if (result.raw) {
@@ -1138,7 +1309,7 @@ Return a JSON object with exactly these keys:
       });
     }
     setLoading(false);
-  }, [transactions, incomes, goals, budgets, currency, totalIncome, totalSpent, savingsRate, topCat, overBudget]);
+  };
   
   const generateReport = async () => {
     if (transactions.length === 0) {
@@ -1175,7 +1346,7 @@ Return a JSON object with:
   "recommendations": ["recommendation 1", "recommendation 2"]
 }`;
 
-      const result = await callAIService(prompt);
+      const result = await callNVIDIA(prompt);
       
       let parsedResult = result;
       if (result.raw) {
@@ -1216,17 +1387,17 @@ Return a JSON object with:
   
   useEffect(() => {
     generateAdvice();
-  }, [transactions.length, generateAdvice]);
+  }, [transactions.length]);
   
   if (transactions.length === 0) {
     return (
-      <div className="ai-advisor-card" style={{ borderLeft: '3px solid var(--mint)' }}>
-        <div className="ai-advisor-header" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="ai-advisor-card">
+        <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
-          <span className="ai-advisor-status offline" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)' }}>⏸ No Data</span>
+          <span className="ai-advisor-status offline">⏸ No Data</span>
         </div>
-        <div className="ai-advisor-summary" style={{ fontSize: 'var(--font-size-body)', fontWeight: 600, marginBottom: 8 }}>Upload transactions to get personalized financial advice.</div>
-        <div style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)' }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
+        <div className="ai-advisor-summary">Upload transactions to get personalized financial advice.</div>
+        <div style={{ fontSize: 14, color: "var(--muted)" }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
       </div>
     );
   }
@@ -1237,30 +1408,30 @@ Return a JSON object with:
   
   return (
     <div>
-      <div className="ai-advisor-card" style={{ borderLeft: '3px solid var(--mint)' }}>
-        <div className="ai-advisor-header" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+      <div className="ai-advisor-card">
+        <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
-          <span className={`ai-advisor-status ${statusClass}`} style={{ fontSize: 'var(--font-size-small)', fontWeight: 600, color: aiStatus === 'live' ? 'var(--mint)' : 'var(--muted)' }}>
+          <span className={`ai-advisor-status ${statusClass}`}>
             {aiStatus === "thinking" ? "⏳ Thinking" : 
              aiStatus === "live" ? "✓ Live" : 
              aiStatus === "error" ? "✗ Offline" : 
              aiStatus === "offline" ? "⏸ No Data" : "Ready"}
           </span>
-          <button className="ai-refresh-btn" onClick={generateAdvice} disabled={loading} style={{ marginLeft: 'auto', padding: '4px 12px', fontSize: 'var(--font-size-small)' }}>
+          <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
             {loading ? "⏳" : "⟳ Refresh Advice"}
           </button>
         </div>
         
         {loading ? (
-          <div className="ai-report-loading" style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div className="spinner" style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid var(--border)', borderTop: '3px solid var(--mint)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-            <div style={{ marginTop: 12, color: 'var(--muted)' }}>Analyzing your finances...</div>
+          <div className="ai-report-loading">
+            <div className="spinner" />
+            <div style={{ marginTop: 12 }}>Analyzing your finances...</div>
           </div>
         ) : advice ? (
           <>
-            <div className="ai-advisor-summary" style={{ fontSize: 'var(--font-size-body)', fontWeight: 600, marginBottom: 8 }}>💡 {advice.summary}</div>
-            <div className="ai-advisor-opportunity" style={{ fontSize: 'var(--font-size-body)', color: 'var(--text)', marginBottom: 6 }}>📌 {advice.opportunity}</div>
-            <div className="ai-advisor-encouragement" style={{ fontSize: 'var(--font-size-body)', color: 'var(--mint)', fontWeight: 500 }}>🌟 {advice.encouragement}</div>
+            <div className="ai-advisor-summary">💡 {advice.summary}</div>
+            <div className="ai-advisor-opportunity">📌 {advice.opportunity}</div>
+            <div className="ai-advisor-encouragement">🌟 {advice.encouragement}</div>
           </>
         ) : null}
       </div>
@@ -1272,15 +1443,15 @@ Return a JSON object with:
       </div>
       
       {showReport && (
-        <div className="ai-report-card card">
+        <div className="ai-report-card">
           <div className="card-title">📊 Weekly Spending Report</div>
           {reportLoading ? (
-            <div className="ai-report-loading" style={{ textAlign: 'center', padding: '20px' }}>
-              <div className="spinner" style={{ display: 'inline-block', width: 30, height: 30, border: '3px solid var(--border)', borderTop: '3px solid var(--mint)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-              <div style={{ marginTop: 12, color: 'var(--muted)' }}>Generating your report...</div>
+            <div className="ai-report-loading">
+              <div className="spinner" />
+              <div style={{ marginTop: 12 }}>Generating your report...</div>
             </div>
           ) : report ? (
-            <div className="ai-report-content" style={{ whiteSpace: 'pre-wrap', fontSize: 'var(--font-size-body)', lineHeight: 1.6 }}>
+            <div className="ai-report-content">
               <p><strong>Top Category:</strong> {report.topCategory}</p>
               <p><strong>Spending Trend:</strong> {report.trend === "up" ? "📈 Increasing" : report.trend === "down" ? "📉 Decreasing" : "➡️ Stable"}</p>
               <p><strong>Assessment:</strong> {report.assessment}</p>
@@ -1300,23 +1471,14 @@ Return a JSON object with:
   );
 }
 
-// ─── FINANCIAL HEALTH (Phase 1: tooltips, Phase 3: savings pulse) ──────────
+// ─── FINANCIAL HEALTH COMPONENT ─────────────────────────────────────────────
 function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
-  const [pulse, setPulse] = useState(false);
-  
-  useEffect(() => {
-    if (health.hasData && health.savingsRate >= 20) {
-      setPulse(true);
-      const timer = setTimeout(() => setPulse(false), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [health.savingsRate, health.hasData]);
   
   if (!health.hasData) {
     return (
       <div className="health-score-card">
-        <div className="health-no-data" style={{ textAlign: 'center', padding: '20px' }}>
+        <div className="health-no-data">
           <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
           <div className="empty-text">No financial data yet</div>
           <div className="empty-sub">Upload transactions or add income to see your financial health score</div>
@@ -1353,66 +1515,52 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   
   return (
     <div className="health-score-card">
-      <div className="health-score-main" style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
-        <div className="health-score-circle" style={{ width: 100, height: 100, borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: scoreColor, color: 'white', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'var(--font-size-h1)' }}>
+      <div className="health-score-main">
+        <div className="health-score-circle" style={{ background: scoreColor }}>
           {health.score}
-          <span className="grade" style={{ fontSize: 'var(--font-size-small)', fontWeight: 600, opacity: 0.9 }}>Grade {health.grade}</span>
+          <span className="grade">Grade {health.grade}</span>
         </div>
-        <div className="health-score-details" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
+        <div className="health-score-details">
           <div className="health-metric">
-            <div className="health-metric-label" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Savings Rate</div>
-            <div className={`health-metric-value ${pulse ? 'savings-pulse' : ''}`} style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-h2)', fontWeight: 700, color: 'var(--text)' }}>
-              {health.savingsRate}%
-            </div>
-            <div className="health-metric-bar" style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
-              <div className="health-metric-bar-fill" style={{ height: '100%', width: `${health.savingsScore}%`, background: 'var(--mint)', borderRadius: 2, transition: 'width 0.6s ease' }} />
-            </div>
-            <div className="tooltip">Percentage of income saved this month. Aim for ≥20%.</div>
+            <div className="health-metric-label">Savings Rate</div>
+            <div className="health-metric-value">{health.savingsRate}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.savingsScore}%`, background: "var(--mint)" }} /></div>
           </div>
           <div className="health-metric">
-            <div className="health-metric-label" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Budget</div>
-            <div className="health-metric-value" style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-h2)', fontWeight: 700, color: 'var(--text)' }}>{health.budgetScore}%</div>
-            <div className="health-metric-bar" style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
-              <div className="health-metric-bar-fill" style={{ height: '100%', width: `${health.budgetScore}%`, background: 'var(--mint)', borderRadius: 2, transition: 'width 0.6s ease' }} />
-            </div>
-            <div className="tooltip">How well you're staying within your set budgets. 100% = perfect.</div>
+            <div className="health-metric-label">Budget</div>
+            <div className="health-metric-value">{health.budgetScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.budgetScore}%`, background: "var(--mint)" }} /></div>
           </div>
           <div className="health-metric">
-            <div className="health-metric-label" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Stability</div>
-            <div className="health-metric-value" style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-h2)', fontWeight: 700, color: 'var(--text)' }}>{health.stabilityScore}%</div>
-            <div className="health-metric-bar" style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
-              <div className="health-metric-bar-fill" style={{ height: '100%', width: `${health.stabilityScore}%`, background: 'var(--mint)', borderRadius: 2, transition: 'width 0.6s ease' }} />
-            </div>
-            <div className="tooltip">Measures month-to-month spending fluctuation. Higher = more predictable.</div>
+            <div className="health-metric-label">Stability</div>
+            <div className="health-metric-value">{health.stabilityScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.stabilityScore}%`, background: "var(--mint)" }} /></div>
           </div>
           <div className="health-metric">
-            <div className="health-metric-label" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Goals</div>
-            <div className="health-metric-value" style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-h2)', fontWeight: 700, color: 'var(--text)' }}>{health.goalScore}%</div>
-            <div className="health-metric-bar" style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
-              <div className="health-metric-bar-fill" style={{ height: '100%', width: `${health.goalScore}%`, background: 'var(--mint)', borderRadius: 2, transition: 'width 0.6s ease' }} />
-            </div>
-            <div className="tooltip">Average progress toward your saving goals.</div>
+            <div className="health-metric-label">Goals</div>
+            <div className="health-metric-value">{health.goalScore}%</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.goalScore}%`, background: "var(--mint)" }} /></div>
           </div>
         </div>
       </div>
       
-      <div className="risk-meter" style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, padding: '12px 16px', borderRadius: 8, background: 'var(--bg)' }}>
-        <div className={`risk-dot ${health.riskLevel}`} style={{ width: 12, height: 12, borderRadius: '50%', background: health.riskLevel === 'green' ? 'var(--risk-green)' : health.riskLevel === 'yellow' ? 'var(--risk-yellow)' : 'var(--risk-red)', flexShrink: 0 }} />
-        <span className="risk-label" style={{ fontWeight: 600, fontSize: 'var(--font-size-body)' }}>{health.riskLabel}</span>
+      <div className={`risk-meter`}>
+        <div className={`risk-dot ${health.riskLevel}`} />
+        <span className="risk-label">{health.riskLabel}</span>
         {health.riskFactors.length > 0 && (
-          <span className="risk-factors" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)' }}>• {health.riskFactors.join(" • ")}</span>
+          <span className="risk-factors">• {health.riskFactors.join(" • ")}</span>
         )}
         {health.riskFactors.length === 0 && health.hasData && (
-          <span className="risk-factors" style={{ fontSize: 'var(--font-size-small)', color: 'var(--muted)' }}>• All metrics look good!</span>
+          <span className="risk-factors">• All metrics look good!</span>
         )}
       </div>
       
       {insights.length > 0 && (
-        <div className="insight-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 12 }}>
+        <div className="insight-cards">
           {insights.map((insight, idx) => (
-            <div key={idx} className="insight-mini-card" style={{ background: 'var(--bg)', padding: '12px 16px', borderRadius: 8, borderLeft: '3px solid var(--mint)' }}>
-              <span className="icon" style={{ fontSize: 'var(--font-size-body)', marginRight: 8 }}>{insight.icon}</span>
-              <span className="text" style={{ fontSize: 'var(--font-size-body)' }}>{insight.text}</span>
+            <div key={idx} className="insight-mini-card">
+              <span className="icon">{insight.icon}</span>
+              <span className="text">{insight.text}</span>
             </div>
           ))}
         </div>
@@ -1455,7 +1603,8 @@ function ContactPage() {
     </div>
   );
 }
-// ─── WHAT-IF PAGE (Phase 3: slider tooltip) ────────────────────────────────
+
+// ─── WHAT-IF PAGE ─────────────────────────────────────────────────────────────
 function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddScenario, onDeleteScenario }) {
   const [habitName, setHabitName] = useState("");
   const [habitDays, setHabitDays] = useState(30);
@@ -1465,8 +1614,6 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   const [reducePercent, setReducePercent] = useState(10);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customForm, setCustomForm] = useState({ action: "", amount: "", frequency: "monthly", duration: "", durationUnit: "months" });
-  const [tooltipPosition, setTooltipPosition] = useState(0);
-  const sliderRef = useRef(null);
   
   const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const monthlyIncome = grossIncome;
@@ -1484,16 +1631,6 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   
   const reducedAmount = monthlyCategorySpend * (reducePercent / 100);
   const yearlySavings = reducedAmount * 12;
-  
-  const handleReduceChange = (e) => {
-    const val = parseInt(e.target.value);
-    setReducePercent(val);
-    if (sliderRef.current) {
-      const pct = (val - 0) / (50 - 0);
-      const width = sliderRef.current.offsetWidth;
-      setTooltipPosition(pct * width);
-    }
-  };
   
   const calculateCustomScenario = (scenario) => {
     const amount = parseFloat(scenario.amount) || 0;
@@ -1551,13 +1688,7 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
         <div className="whatif-title">Scenario B: Reduce a category</div>
         <div className="whatif-input-group">
           <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
-          <div className="whatif-field" style={{ flex: 2 }}>
-            <label>Reduce by (%)</label>
-            <div className="whatif-slider-container">
-              <input type="range" ref={sliderRef} min="0" max="50" value={reducePercent} onChange={handleReduceChange} style={{ flex: 1, width: '100%' }} />
-              <div className="whatif-slider-tooltip" style={{ left: tooltipPosition }}>{reducePercent}%</div>
-            </div>
-          </div>
+          <div className="whatif-field"><label>Reduce by (%)</label><input type="range" min="0" max="50" value={reducePercent} onChange={e => setReducePercent(parseInt(e.target.value))} /><span style={{ marginLeft: 8 }}>{reducePercent}%</span></div>
         </div>
         <div className="whatif-output">
           <div className="whatif-output-text">Current monthly spend on {reduceCategory}: <strong>{formatMoney(monthlyCategorySpend, currency)}</strong></div>
@@ -1621,8 +1752,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   );
 }
 
-// ─── DASHBOARD PAGE (Phase 3: staggered budget bars) ─────────────────────────
-function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget, onAddIncome, onDeleteIncome, currency, onCurrencyChange, showToast }) {
+// ─── DASHBOARD PAGE ──────────────────────────────────────────────────────────
+function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget, onAddIncome, onDeleteIncome, currency, onCurrencyChange, showToast, onNavigate }) {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showCreditedBreakdown, setShowCreditedBreakdown] = useState(false);
@@ -1631,14 +1762,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const [customCategories, setCustomCategories] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
-  const [budgetBarsAnimated, setBudgetBarsAnimated] = useState(false);
-  
-  useEffect(() => {
-    if (budgets.length > 0) {
-      const timer = setTimeout(() => setBudgetBarsAnimated(true), 100);
-      return () => clearTimeout(timer);
-    }
-  }, [budgets]);
+  const [nudgeResolved, setNudgeResolved] = useState(false);
   
   const tagline = taglines[new Date().getDay() % taglines.length];
   
@@ -1677,8 +1801,12 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   }));
   
   const recent = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+
+  // Zeigarnik-effect nudge: transactions sitting uncategorized are an open
+  // loop. Surfacing the count (capped, not nagging) — see Phase 1/3.
+  const uncategorizedCount = transactions.filter(t => (t.customCategory || t.category) === "Other").length;
   
-  // Spending alerts (unchanged)
+  // Spending alerts
   useEffect(() => {
     if (transactions.length > 0) {
       const lastTx = transactions[0];
@@ -1800,16 +1928,41 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         <div className="stat-card free"><div className="stat-label">Free Cash <small style={{ display: "block", fontSize: 10, marginTop: 2 }}>(money left after expenses)</small></div><div className="stat-value">{formatMoney(freeCash, currency)}</div><div className="stat-sub">Income + Credits - Spending</div></div>
         <div className="stat-card savings"><div className="stat-label">Savings Progress</div><div className="stat-value">{savingsProgress}%</div><div className="stat-sub">{formatMoney(totalSaved, currency)} saved of {formatMoney(totalTarget, currency)} target</div></div>
       </div>
+
+      {uncategorizedCount > 0 && (
+        <div className={`nudge-card ${nudgeResolved ? "resolved" : ""}`} style={{ marginBottom: 20 }}>
+          <div className="nudge-text">📦 <span className="nudge-count">{uncategorizedCount}</span> transaction{uncategorizedCount !== 1 ? "s" : ""} need{uncategorizedCount === 1 ? "s" : ""} categorizing</div>
+          <button onClick={() => { setNudgeResolved(true); setTimeout(() => onNavigate && onNavigate("transactions"), 280); }}>Sort them →</button>
+        </div>
+      )}
+
+      {goals.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          {goals.slice(0, 2).map(g => {
+            const pct = g.target > 0 ? Math.min(100, Math.round((g.saved / g.target) * 100)) : 0;
+            return (
+              <div key={g.id} className="dash-goal-card">
+                <div className="goal-row">
+                  <span className="goal-name">🎯 {g.name}</span>
+                  <span className="goal-pct">{pct}%</span>
+                </div>
+                <div className="goal-bar-track"><div className="goal-bar-fill" style={{ width: `${pct}%` }} /></div>
+                <div className="goal-sub">{formatMoney(g.saved, currency)} of {formatMoney(g.target, currency)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       
       <div className="dashboard-grid">
         <div className="card"><div className="card-title">Spending by Category</div><DonutChart data={chartData} currency={currency} /></div>
         <div className="card"><div className="card-title">Monthly Budgets <button className="btn-outline" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setShowBudgetModal(true)}>Edit All Budgets</button></div>
           {budgets.length === 0 ? (<div className="empty-state"><div className="empty-text">No budgets set. Click "Edit All Budgets" to start planning.</div></div>) : (
-            budgets.map((b, idx) => {
+            budgets.map(b => {
               const spent = categorySpending[b.category] || 0;
-              const percent = Math.min((spent / b.amount) * 100, 100);
+              const percent = (spent / b.amount) * 100;
               const isOver = spent > b.amount;
-              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className="budget-bar"><div className={`budget-fill ${budgetBarsAnimated ? 'stagger' : ''}`} style={{ '--final-width': `${percent}%`, width: budgetBarsAnimated ? 0 : `${percent}%`, animationDelay: `${idx * 100}ms`, background: isOver ? 'var(--danger)' : 'var(--mint)' }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
+              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className="budget-bar"><div className="budget-fill" style={{ width: `${Math.min(percent, 100)}%`, background: isOver ? COLORS.danger : COLORS.mint }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
             })
           )}
         </div>
@@ -1837,7 +1990,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   );
 }
 
-// ─── UPLOAD PAGE (Phase 1: removed PDF mock and receipt scanner) ──────────
+// ─── UPLOAD PAGE ─────────────────────────────────────────────────────────────
 function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   const [dragover, setDragover] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -1907,13 +2060,77 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     showToast(`${newTx.length} transactions added!`);
   };
   
+  // PDF handling - extract text content
   const handleFile = (file) => {
     if (!file) return;
     
-    // PDF handling – now only shows warning, no auto-generation
+    // Check if it's a PDF
     if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      showToast("📄 PDF support: PDF extraction is experimental. Please use CSV for accurate results.");
-      // No longer generates mock transactions.
+      showToast("📄 PDF support: Please note that PDF extraction is limited. For best results, use CSV files.");
+      
+      // Read PDF as text (limited extraction)
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        // Try to extract text from PDF (very basic)
+        const text = content.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ');
+        const lines = text.split(/\n/).filter(l => l.trim().length > 0);
+        
+        // Look for transaction-like patterns
+        const transactions = [];
+        const datePattern = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
+        const amountPattern = /([\d,]+\.\d{2})/;
+        
+        for (const line of lines) {
+          const dateMatch = line.match(datePattern);
+          const amountMatch = line.match(amountPattern);
+          if (dateMatch && amountMatch) {
+            const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+            if (amount > 0) {
+              transactions.push({
+                id: simpleHash(line + Date.now()),
+                date: dateMatch[1].includes('-') ? dateMatch[1] : dateMatch[1].replace(/[\/\.]/g, '-'),
+                description: line.substring(0, 50),
+                amount: amount,
+                type: "debit",
+                category: "Other",
+                customCategory: "",
+                tags: [],
+                notes: "",
+                splits: [],
+                incomeType: "",
+                isRecurring: false
+              });
+            }
+          }
+        }
+        
+        if (transactions.length > 0) {
+          const fileKey = simpleHash(file.name + file.size + Date.now());
+          setPreview({ filename: file.name, fileKey, transactions: transactions.slice(0, 50) });
+          showToast(`Found ${transactions.length} potential transactions in PDF. Please review.`);
+        } else {
+          showToast("⚠️ Could not extract transactions from this PDF. Please use CSV format for better results.");
+          // Generate unique mock data based on file info
+          const mockTx = Array.from({ length: 5 + Math.floor(Math.random() * 5) }, (_, i) => ({
+            id: `${file.name}-${file.size}-${Date.now()}-${i}`,
+            date: new Date(Date.now() - i * 86400000 * (2 + Math.random() * 3)).toISOString().split("T")[0],
+            description: ["Choppies Supermarket","FNB Transfer","BPC Electricity","Orange Botswana","Pick n Pay","Debonairs Pizza","Shell Gaborone","Clicks Pharmacy","Netflix","Showmax"][i % 10] + ` (PDF sample ${i+1})`,
+            amount: [120.50,340.00,280.00,89.00,215.75,95.00,450.00,125.50,99.00,129.00][i % 10],
+            type: i % 3 === 0 ? "credit" : "debit",
+            category: ["Groceries","Other","Bills","Bills","Groceries","Food & Dining","Transport","Health","Entertainment","Entertainment"][i % 10],
+            customCategory: "",
+            tags: [],
+            notes: "Extracted from PDF - please verify",
+            splits: [],
+            incomeType: i % 3 === 0 ? "Other" : "",
+            isRecurring: false
+          }));
+          const fileKey = simpleHash(file.name + file.size + Date.now());
+          setPreview({ filename: file.name, fileKey, transactions: mockTx });
+        }
+      };
+      reader.readAsText(file);
       return;
     }
     
@@ -1957,7 +2174,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
             <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div>
             <div className="upload-sub"><strong>CSV files</strong> work best. PDF support is experimental and may not extract all transactions.</div>
             <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
-            <div className="format-pills" style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}><span className="format-pill" style={{ padding: '4px 12px', borderRadius: 20, background: 'var(--mint-dim)', fontSize: 'var(--font-size-small)' }}>CSV ✓</span><span className="format-pill" style={{ padding: '4px 12px', borderRadius: 20, background: 'var(--danger-dim)', fontSize: 'var(--font-size-small)', opacity: 0.7 }}>PDF ⚠️</span></div>
+            <div className="format-pills"><span className="format-pill">CSV ✓</span><span className="format-pill">PDF ⚠️</span></div>
             <input ref={fileRef} type="file" accept=".csv,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
           
@@ -1966,8 +2183,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
             <button className="btn-save" onClick={() => setShowAddModal(true)} style={{ width: "100%" }}>+ Add Transaction(s)</button>
           </div>
           
-          {/* Receipt scanner removed – "Coming soon" badge only */}
-          <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><div className="empty-sub" style={{ marginTop: 12 }}>📸 Receipt scanning is coming soon! For now, please add transactions manually or upload a CSV.</div></div></div>
+          <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { const previewImg = ev.target.result; const shimmerDiv = document.getElementById("scan-shimmer"); if (shimmerDiv) shimmerDiv.style.display = "block"; setTimeout(() => { if (shimmerDiv) shimmerDiv.style.display = "none"; const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30); const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] }; document.getElementById("scan-result").innerHTML = `<div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 12px; object-fit: cover;" /></div><div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div><div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div><div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div><button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>`; document.getElementById("scan-add-btn")?.addEventListener("click", () => { const amount = parseFloat(document.getElementById("scan-amount").value); const description = document.getElementById("scan-merchant").value; const date = document.getElementById("scan-date").value; if (amount && description) { document.getElementById("receipt-input").value = ""; document.getElementById("scan-result").innerHTML = ""; const newTx = [{ id: Date.now(), date, description, amount, type: "debit", category: "Other", customCategory: "", tags: [], notes: "", splits: [], incomeType: "", isRecurring: false }]; const fileKey = simpleHash(file.name + file.size + Date.now()); handleConfirmUpload(newTx, fileKey, `Receipt-${merchant}`); } }); }, 1500); }; reader.readAsDataURL(file); } }} /><button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button><div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div><div id="scan-result"></div><div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div></div></div>
           
           {uploadedFiles.length > 0 && (<div className="card"><div className="card-title">📋 Upload History</div><div className="upload-history">{uploadedFiles.map((f, i) => (<div key={i} className="history-item"><span>{f.name}</span><span>{new Date(f.dateUploaded).toLocaleDateString()} · {f.txCount} transactions</span></div>))}</div></div>)}
         </>
@@ -2010,7 +2226,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   );
 }
 
-// ─── TRANSACTIONS PAGE (Phase 1: fix bulk selection) ──────────────────────
+// ─── TRANSACTIONS PAGE ─────────────────────────────────────────────────────
 function TransactionsPage({ transactions, setTransactions, currency, showToast }) {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
@@ -2025,11 +2241,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   const [selectedTxIds, setSelectedTxIds] = useState(new Set());
   const [openMenuId, setOpenMenuId] = useState(null);
   const [splitLines, setSplitLines] = useState([{ description: "", amount: "", category: "Other" }]);
-  
-  // Clear selection when filter changes (Phase 1 fix)
-  useEffect(() => {
-    setSelectedTxIds(new Set());
-  }, [activeFilter]);
   
   const quickFilters = [
     { id: "all", label: "All", filter: () => true },
@@ -2091,21 +2302,18 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   };
   
   const handleBulkRecategorise = (newCategory) => {
-    // Only act on selected IDs that are currently in the filtered list
-    const idsToUpdate = new Set([...selectedTxIds].filter(id => filtered.some(t => t.id === id)));
-    setTransactions(transactions.map(tx => idsToUpdate.has(tx.id) ? { ...tx, category: newCategory } : tx));
+    setTransactions(transactions.map(tx => selectedTxIds.has(tx.id) ? { ...tx, category: newCategory } : tx));
     setSelectedTxIds(new Set());
     setBulkMode(false);
-    showToast(`Updated ${idsToUpdate.size} transactions`);
+    showToast(`Updated ${selectedTxIds.size} transactions`);
   };
   
   const handleBulkDelete = () => {
-    const idsToDelete = new Set([...selectedTxIds].filter(id => filtered.some(t => t.id === id)));
-    if (window.confirm(`Delete ${idsToDelete.size} transactions?`)) {
-      setTransactions(transactions.filter(tx => !idsToDelete.has(tx.id)));
+    if (window.confirm(`Delete ${selectedTxIds.size} transactions?`)) {
+      setTransactions(transactions.filter(tx => !selectedTxIds.has(tx.id)));
       setSelectedTxIds(new Set());
       setBulkMode(false);
-      showToast(`Deleted ${idsToDelete.size} transactions`);
+      showToast(`Deleted ${selectedTxIds.size} transactions`);
     }
   };
   
@@ -2128,7 +2336,7 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
 
 Provide a short, useful explanation of what this transaction represents in their financial picture.`;
       
-      const result = await callAIService(prompt);
+      const result = await callNVIDIA(prompt);
       let explanation = result.raw || JSON.stringify(result);
       explanation = explanation.replace(/\{[\s\S]*\}/, '').trim() || explanation;
       if (explanation.length > 500) explanation = explanation.substring(0, 500) + "...";
@@ -2196,7 +2404,7 @@ Provide a short, useful explanation of what this transaction represents in their
   );
 }
 
-// ─── INSIGHTS PAGE (unchanged) ──────────────────────────────────────────────
+// ─── INSIGHTS PAGE ───────────────────────────────────────────────────────────
 function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const totalCredit = transactions.filter(t => t.type === "credit").reduce((s, t) => s + t.amount, 0);
@@ -2275,7 +2483,7 @@ function InsightsPage({ transactions, currency }) {
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}
   
   {transactions.length > 0 && (
-    <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, #00C89620, var(--navy))" : "linear-gradient(135deg, var(--danger-dim), var(--navy))" }}>
+    <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, #00C89620, #1A1A2E)" : "linear-gradient(135deg, #FF475720, #1A1A2E)" }}>
       <div className="insight-label">{savings > 0 ? "💰 Savings" : "📊 Spending"}</div>
       <div className="insight-text">
         {savings > 0 
@@ -2286,10 +2494,10 @@ function InsightsPage({ transactions, currency }) {
     </div>
   )}
   
-  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { color: "#CBD5E0", icon: "📦" }; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, var(--navy))" : "linear-gradient(135deg, var(--navy) 0%, var(--navy-deep) 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
+  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { color: "#CBD5E0", icon: "📦" }; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
 }
 
-// ─── GOALS PAGE (unchanged) ──────────────────────────────────────────────────
+// ─── GOALS PAGE ──────────────────────────────────────────────────────────────
 function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [showContributeModal, setShowContributeModal] = useState(null);
@@ -2309,11 +2517,11 @@ function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   };
   
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Goals</div><div className="greeting-tagline">Track what you're saving toward</div></div><div className="goals-grid">{goals.length === 0 && (<div style={{ gridColumn: "1/-1" }}><div className="empty-state" style={{ padding: "60px 20px" }}><div className="empty-icon">🎯</div><div className="empty-text">No goals yet. Add one.</div><div className="empty-sub">Set a saving target and track your progress</div></div></div>)}{goals.map((g) => { const pct = g.target > 0 ? Math.min((g.saved / g.target) * 100, 100) : 0; const weekly = g.deadline ? Math.max(0, (g.target - g.saved) / Math.max(1, Math.ceil((new Date(g.deadline) - new Date()) / (7 * 86400000)))) : null; return (<div key={g.id} className="goal-card"><div className="goal-header"><div className="goal-name">{g.name}</div><div className="goal-emoji">{g.emoji}</div></div><div className="goal-amounts"><div className="goal-saved">{formatMoney(g.saved, currency)}</div><div className="goal-target">of {formatMoney(g.target, currency)}</div></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div><div className="goal-meta">{pct.toFixed(0)}% complete{weekly !== null && ` · Save ${formatMoney(weekly, currency)}/week`}{g.deadline && ` · Due ${g.deadline}`}</div><button className="btn-outline" style={{ marginTop: 12, width: "100%" }} onClick={() => setShowContributeModal(g)}>+ Add to Goal</button></div>); })}<button className="add-goal-card" onClick={() => setShowModal(true)}><div className="add-goal-icon">+</div><div className="add-goal-text">Add a goal</div></button></div>
-  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "var(--mint-dim)" : "none", border: `1px solid ${form.emoji === e ? "var(--mint)" : "var(--border)"}`, borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className="btn-save" onClick={handleSave}>Save Goal</button></div></div></div>)}
+  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "#00C89620" : "none", border: `1px solid ${form.emoji === e ? "#00C896" : "var(--border)"}`, borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className="btn-save" onClick={handleSave}>Save Goal</button></div></div></div>)}
   {showContributeModal && (<div className="modal-overlay" onClick={() => setShowContributeModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add to {showContributeModal.name}</div><label className="modal-label">Amount to contribute ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={contributeAmount} onChange={e => setContributeAmount(e.target.value)} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowContributeModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleContribute(showContributeModal.id)}>Contribute</button></div></div></div>)}</div>);
 }
 
-// ─── SETTINGS PAGE (unchanged) ──────────────────────────────────────────────
+// ─── SETTINGS PAGE ───────────────────────────────────────────────────────────
 function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange, textSize, onTextSizeChange, transactions, goals, incomes, budgets, customScenarios, onRestoreData, showToast }) {
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
   const handleCurrencyChange = (newCurrency) => { if (!currencyConfirmShown) { showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`); setCurrencyConfirmShown(true); } onCurrencyChange(newCurrency); };
@@ -2369,6 +2577,10 @@ export default function SpendSight() {
   const [toast, setToast] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [sessionWarning, setSessionWarning] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearConfirmText, setClearConfirmText] = useState("");
+  const [clearConfirmShake, setClearConfirmShake] = useState(false);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const lastActivityRef = useRef(Date.now());
@@ -2395,15 +2607,28 @@ export default function SpendSight() {
   
   const dismissInstall = () => { setShowInstallPrompt(false); localStorage.setItem("install_dismissed", "true"); };
   
-  // Session timeout
+  // Session timeout — now warns 2 minutes before the hard 15-minute cutoff,
+  // instead of silently logging the user out mid-read. See Phase 1 audit.
   useEffect(() => {
     if (!user) return;
-    const resetTimer = () => { lastActivityRef.current = Date.now(); if (sessionExpired) setSessionExpired(false); };
+    const resetTimer = () => {
+      lastActivityRef.current = Date.now();
+      if (sessionExpired) setSessionExpired(false);
+      if (sessionWarning) setSessionWarning(false);
+    };
     const events = ["mousemove", "keydown", "touchstart", "click"];
     events.forEach(event => document.addEventListener(event, resetTimer));
-    const interval = setInterval(() => { if (Date.now() - lastActivityRef.current > 15 * 60 * 1000 && !sessionExpired) setSessionExpired(true); }, 60000);
+    const interval = setInterval(() => {
+      const idleMs = Date.now() - lastActivityRef.current;
+      if (idleMs > 15 * 60 * 1000 && !sessionExpired) {
+        setSessionExpired(true);
+        setSessionWarning(false);
+      } else if (idleMs > 13 * 60 * 1000 && !sessionWarning && !sessionExpired) {
+        setSessionWarning(true);
+      }
+    }, 15000);
     return () => { events.forEach(event => document.removeEventListener(event, resetTimer)); clearInterval(interval); };
-  }, [user, sessionExpired]);
+  }, [user, sessionExpired, sessionWarning]);
   
   // Apply text size
   useEffect(() => { const html = document.documentElement; html.classList.remove("text-small", "text-normal", "text-large", "text-xlarge"); html.classList.add(`text-${textSize}`); }, [textSize]);
@@ -2462,11 +2687,16 @@ export default function SpendSight() {
     if (data.textSize) setTextSize(data.textSize);
   };
   
-  const handleClearData = () => {
-    if (window.confirm("⚠️ Delete ALL data? This cannot be undone.")) {
-      setTransactions([]); setGoals([]); setUploadedFiles([]); setIncomes([]); setBudgets([]); setCustomScenarios([]);
-      showToast("All data cleared.");
+  const handleClearData = () => { setClearConfirmText(""); setShowClearConfirm(true); };
+  const handleConfirmClearData = () => {
+    if (clearConfirmText.trim().toUpperCase() !== "DELETE") {
+      setClearConfirmShake(true);
+      setTimeout(() => setClearConfirmShake(false), 400);
+      return;
     }
+    setTransactions([]); setGoals([]); setUploadedFiles([]); setIncomes([]); setBudgets([]); setCustomScenarios([]);
+    setShowClearConfirm(false);
+    showToast("All data cleared.");
   };
   
   const navItems = [
@@ -2482,7 +2712,35 @@ export default function SpendSight() {
   
   if (!user) { return (<><style>{css}</style><div className="auth-screen"><div className="auth-card"><div className="auth-logo"><span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span></div><div className="auth-tagline">Your money, your clarity.</div><div className="auth-tabs"><button className={`auth-tab ${authTab === "login" ? "active" : ""}`} onClick={() => setAuthTab("login")}>Sign In</button><button className={`auth-tab ${authTab === "signup" ? "active" : ""}`} onClick={() => setAuthTab("signup")}>Sign Up</button></div>{authTab === "signup" && (<div className="form-group"><label className="form-label">Your Name</label><input className="form-input" placeholder="e.g. El" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>)}<div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" placeholder="you@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div><button className="btn-primary" onClick={handleAuth}>{authTab === "login" ? "Sign In →" : "Create Account →"}</button></div></div>{toast && <div className="toast">{toast}</div>}</>); }
   if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
-  if (sessionExpired) { return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>); }
+  if (sessionExpired) { return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); setSessionWarning(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>); }
   
-  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
+  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} onNavigate={setPage} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>
+      {sessionWarning && !sessionExpired && (
+        <div className="session-warning-banner">
+          <div className="title">⏳ Session ending soon</div>
+          <div className="sub">You've been idle a while — we'll sign you out in about 2 minutes to keep your finances secure.</div>
+          <button onClick={() => { lastActivityRef.current = Date.now(); setSessionWarning(false); }}>I'm still here</button>
+        </div>
+      )}
+      {showClearConfirm && (
+        <div className="modal-overlay" onClick={() => setShowClearConfirm(false)}>
+          <div className="destructive-modal" onClick={e => e.stopPropagation()}>
+            <div className="icon">⚠️</div>
+            <div className="title">Delete all data?</div>
+            <div className="body">This permanently deletes every transaction, goal, income entry, and budget. This cannot be undone. Type <strong>DELETE</strong> to confirm.</div>
+            <input
+              className={`confirm-input ${clearConfirmShake ? "shake" : ""}`}
+              placeholder="Type DELETE"
+              value={clearConfirmText}
+              onChange={e => setClearConfirmText(e.target.value)}
+              autoFocus
+            />
+            <div className="actions">
+              <button className="btn-cancel-d" onClick={() => setShowClearConfirm(false)}>Cancel</button>
+              <button className="btn-confirm-d" disabled={clearConfirmText.trim().toUpperCase() !== "DELETE"} onClick={handleConfirmClearData}>Delete everything</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {toast && <div className="toast">{toast}</div>}</>);
 }
