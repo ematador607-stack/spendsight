@@ -793,130 +793,6 @@ const css = `
     50% { opacity: 1; }
   }
 
-  /* ── ENHANCED UX: LOADING & PROCESSING ── */
-  .processing-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 15, 26, 0.7);
-    backdrop-filter: blur(4px);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-    color: white;
-    animation: fadeIn 0.3s ease;
-  }
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-  .processing-card {
-    background: var(--secondary);
-    padding: 32px;
-    border-radius: 16px;
-    border: 1px solid #ffffff15;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 20px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-    min-width: 240px;
-  }
-
-  .loader-ring {
-    width: 48px;
-    height: 48px;
-    border: 3px solid rgba(0, 200, 150, 0.1);
-    border-top: 3px solid var(--primary);
-    border-radius: 50%;
-    animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    box-shadow: 0 0 15px rgba(0, 200, 150, 0.2);
-  }
-
-  /* Premium Hover Effects */
-  .card, .stat-card, .goal-card, .settings-card {
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-  }
-  .card:hover, .stat-card:hover, .goal-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.1);
-  }
-
-  /* Smooth Page Transitions */
-  .main {
-    animation: pageSlideIn 0.4s ease-out;
-  }
-  @keyframes pageSlideIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .processing-text {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 18px;
-    letter-spacing: -0.5px;
-  }
-
-  .success-check {
-    width: 60px;
-    height: 60px;
-    background: var(--primary);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--secondary);
-    font-size: 32px;
-    animation: scaleIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  }
-  @keyframes scaleIn { from { transform: scale(0); } to { transform: scale(1); } }
-
-  /* Button Loading State */
-  .btn-loading {
-    position: relative;
-    color: transparent !important;
-    pointer-events: none;
-  }
-  .btn-loading::after {
-    content: "";
-    position: absolute;
-    width: 18px;
-    height: 18px;
-    top: calc(50% - 9px);
-    left: calc(50% - 9px);
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
-  }
-
-  /* Enhanced Toast */
-  .toast {
-    position: fixed;
-    bottom: 32px;
-    left: 50%;
-    transform: translateX(-50%) translateY(0);
-    background: var(--secondary);
-    color: white;
-    padding: 12px 24px;
-    border-radius: 12px;
-    font-weight: 600;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    border: 1px solid #ffffff10;
-    animation: toastIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-  }
-  @keyframes toastIn {
-    from { transform: translateX(-50%) translateY(100px); opacity: 0; }
-    to { transform: translateX(-50%) translateY(0); opacity: 1; }
-  }
-  .toast.success { border-left: 4px solid var(--primary); }
-  .toast.error { border-left: 4px solid var(--error); }
-  .toast-icon { font-size: 18px; }
-
   /* ── HEALTH SCORE ── */
   .health-score-card {
     background: var(--surface);
@@ -2880,10 +2756,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
     return { total, multiplier };
   };
   
-  const [isAddingScenario, setIsAddingScenario] = useState(false);
   const handleAddCustomScenario = () => {
     if (!customForm.action || !customForm.amount) return;
-    setIsAddingScenario(true);
     const result = calculateCustomScenario(customForm);
     onAddScenario({
       id: Date.now(),
@@ -2892,11 +2766,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
       duration: parseInt(customForm.duration) || 1,
       calculatedTotal: result.total
     });
-    setTimeout(() => {
-      setCustomForm({ action: "", amount: "", frequency: "monthly", duration: "", durationUnit: "months" });
-      setShowCustomModal(false);
-      setIsAddingScenario(false);
-    }, 1000);
+    setCustomForm({ action: "", amount: "", frequency: "monthly", duration: "", durationUnit: "months" });
+    setShowCustomModal(false);
   };
   
   // Slider tooltip micro-interaction
@@ -3008,7 +2879,7 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
                 <option value="days">Days</option><option value="weeks">Weeks</option><option value="months">Months</option><option value="years">Years</option>
               </select>
             </div>
-            <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowCustomModal(false)}>Cancel</button><button className={`btn-save ${isAddingScenario ? "btn-loading" : ""}`} onClick={handleAddCustomScenario}>{isAddingScenario ? "" : "Add Scenario"}</button></div>
+            <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowCustomModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddCustomScenario}>Add Scenario</button></div>
           </div>
         </div>
       )}
@@ -3088,13 +2959,11 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     onCurrencyChange(newCurrency);
   };
   
-  const [isAddingIncome, setIsAddingIncome] = useState(false);
   const handleAddIncome = () => {
     if (!incomeForm.amount || incomeForm.amount <= 0) {
-      showToast("Please enter a valid amount", "error");
+      showToast("Please enter a valid amount");
       return;
     }
-    setIsAddingIncome(true);
     onAddIncome({
       id: Date.now(),
       source: incomeForm.source,
@@ -3102,11 +2971,9 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       label: incomeForm.label || "",
       date: incomeForm.date
     });
-    setTimeout(() => {
-      setIncomeForm({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
-      setShowIncomeModal(false);
-      setIsAddingIncome(false);
-    }, 800);
+    setIncomeForm({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
+    setShowIncomeModal(false);
+    showToast(`💰 Added ${formatMoney(parseFloat(incomeForm.amount), currency)} from ${incomeForm.source}`);
   };
   
   const handleAddCustomCategory = () => {
@@ -3219,7 +3086,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         )}
       </div>
       
-      {showIncomeModal && (<div className="modal-overlay" onClick={() => setShowIncomeModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Income</div><label className="modal-label">Source Type</label><select className="modal-input" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} style={{ appearance: "auto" }}>{incomeSources.map(s => <option key={s} value={s}>{s}</option>)}</select><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Label (optional)</label><input className="modal-input" placeholder="e.g. Freelance project" value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button><button className={`btn-save ${isAddingIncome ? "btn-loading" : ""}`} onClick={handleAddIncome}>{isAddingIncome ? "" : "Add Income"}</button></div></div></div>)}
+      {showIncomeModal && (<div className="modal-overlay" onClick={() => setShowIncomeModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Income</div><label className="modal-label">Source Type</label><select className="modal-input" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} style={{ appearance: "auto" }}>{incomeSources.map(s => <option key={s} value={s}>{s}</option>)}</select><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Label (optional)</label><input className="modal-input" placeholder="e.g. Freelance project" value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddIncome}>Add Income</button></div></div></div>)}
       
       {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -3277,38 +3144,32 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     ));
   };
   
-  const [isAdding, setIsAdding] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-
   const handleAddMultipleTransactions = () => {
     const validTx = multipleTransactions.filter(t => t.description && t.amount && t.amount > 0);
     if (validTx.length === 0) {
-      showToast("Please fill in at least one transaction", "error");
+      showToast("Please fill in at least one transaction with description and amount");
       return;
     }
-    setIsAdding(true);
-    setTimeout(() => {
-      const newTx = validTx.map(t => ({
-        id: Date.now() + Math.random() * 1000,
-        date: t.date,
-        description: t.description,
-        amount: parseFloat(t.amount),
-        type: t.type,
-        category: t.category === "Other" && t.customCategory ? t.customCategory : t.category,
-        customCategory: t.category === "Other" && t.customCategory ? t.customCategory : "",
-        tags: t.tags || [],
-        notes: t.notes || "",
-        splits: [],
-        incomeType: t.type === "credit" ? "Other" : "",
-        isRecurring: false
-      }));
-      onUpload(newTx, `manual-${Date.now()}`, "Manual Entry");
-      setMultipleTransactions([
-        { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
-      ]);
-      setShowAddModal(false);
-      setIsAdding(false);
-    }, 600);
+    const newTx = validTx.map(t => ({
+      id: Date.now() + Math.random() * 1000,
+      date: t.date,
+      description: t.description,
+      amount: parseFloat(t.amount),
+      type: t.type,
+      category: t.category === "Other" && t.customCategory ? t.customCategory : t.category,
+      customCategory: t.category === "Other" && t.customCategory ? t.customCategory : "",
+      tags: t.tags || [],
+      notes: t.notes || "",
+      splits: [],
+      incomeType: t.type === "credit" ? "Other" : "",
+      isRecurring: false
+    }));
+    onUpload(newTx, `manual-${Date.now()}`, "Manual Entry");
+    setMultipleTransactions([
+      { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
+    ]);
+    setShowAddModal(false);
+    showToast(`${newTx.length} transactions added!`);
   };
   
   // SECURITY FIX: PDF upload now shows warning instead of generating fake data
@@ -3336,12 +3197,12 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   const handleConfirmUpload = (transactions, fileKey, filename) => {
     const existing = uploadedFiles.find(f => f.hash === fileKey);
     if (existing) {
-      showToast(`"${filename}" has already been imported.`, "error");
+      showToast(`⚠️ "${filename}" has already been imported on ${new Date(existing.dateUploaded).toLocaleDateString()}.`);
       return;
     }
-    setIsConfirming(true);
     onUpload(transactions, fileKey, filename);
-    // State will be cleared by parent effect or naturally as we navigate
+    setPreview(null);
+    setCsvPreview(null);
   };
   
   const handleDrop = (e) => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]); };
@@ -3384,7 +3245,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
           <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {(preview?.filename || csvPreview?.filename)}</div><p style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 16 }}>Found {(preview?.transactions || csvPreview?.transactions).length} transactions. Review and confirm below.</p>
             <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
           </div>
-          <div style={{ display: "flex", gap: 12 }}><button className="btn-cancel" onClick={() => { setPreview(null); setCsvPreview(null); }}>Cancel</button><button className={`btn-save ${isConfirming ? "btn-loading" : ""}`} onClick={() => handleConfirmUpload(preview?.transactions || csvPreview?.transactions, preview?.fileKey || csvPreview?.fileKey, preview?.filename || csvPreview?.filename)}>{isConfirming ? "" : "Confirm & Save →"}</button></div>
+          <div style={{ display: "flex", gap: 12 }}><button className="btn-cancel" onClick={() => { setPreview(null); setCsvPreview(null); }}>Cancel</button><button className="btn-save" onClick={() => handleConfirmUpload(preview?.transactions || csvPreview?.transactions, preview?.fileKey || csvPreview?.fileKey, preview?.filename || csvPreview?.filename)}>Confirm & Save →</button></div>
         </div>
       )}
       
@@ -3412,7 +3273,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
           </div>
         ))}
         <button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={addTransactionRow}>+ Add Another Transaction</button>
-        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowAddModal(false)}>Cancel</button><button className={`btn-save ${isAdding ? "btn-loading" : ""}`} onClick={handleAddMultipleTransactions}>{isAdding ? "" : `Save All (${multipleTransactions.filter(t => t.description && t.amount).length} valid)`}</button></div>
+        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowAddModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddMultipleTransactions}>Save All ({multipleTransactions.filter(t => t.description && t.amount).length} valid)</button></div>
       </div></div>)}
     </div>
   );
@@ -3706,35 +3567,20 @@ function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   const [form, setForm] = useState({ name: "", target: "", deadline: "", emoji: "🎯" });
   const emojis = ["🎯","✈️","🏠","🚗","📱","💍","🎓","💼","🏋️","🎸"];
   
-  const [isSaving, setIsSaving] = useState(false);
-  const [isContributing, setIsContributing] = useState(false);
-
-  const handleSave = () => { 
-    if (!form.name || !form.target) return; 
-    setIsSaving(true);
-    onAdd({ ...form, target: parseFloat(form.target), saved: 0, id: Date.now() }); 
-    setTimeout(() => {
-      setShowModal(false); 
-      setIsSaving(false);
-      setForm({ name: "", target: "", deadline: "", emoji: "🎯" }); 
-    }, 800);
-  };
+  const handleSave = () => { if (!form.name || !form.target) return; onAdd({ ...form, target: parseFloat(form.target), saved: 0, id: Date.now() }); setShowModal(false); setForm({ name: "", target: "", deadline: "", emoji: "🎯" }); };
   
   const handleContribute = (goalId) => {
     const amount = parseFloat(contributeAmount);
-    if (!amount || amount <= 0) { showToast("Please enter a valid amount", "error"); return; }
-    setIsContributing(true);
+    if (!amount || amount <= 0) { showToast("Please enter a valid amount"); return; }
     onContribute(goalId, amount);
-    setTimeout(() => {
-      setShowContributeModal(null);
-      setIsContributing(false);
-      setContributeAmount("");
-    }, 800);
+    setShowContributeModal(null);
+    setContributeAmount("");
+    showToast(`💰 Added ${formatMoney(amount, currency)} to goal!`);
   };
   
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Goals</div><div className="greeting-tagline">Track what you're saving toward</div></div><div className="goals-grid">{goals.length === 0 && (<div style={{ gridColumn: "1/-1" }}><div className="empty-state" style={{ padding: "60px 20px" }}><div className="empty-icon">🎯</div><div className="empty-text">No goals yet. Add one.</div><div className="empty-sub">Set a saving target and track your progress</div></div></div>)}{goals.map((g) => { const pct = g.target > 0 ? Math.min((g.saved / g.target) * 100, 100) : 0; const weekly = g.deadline ? Math.max(0, (g.target - g.saved) / Math.max(1, Math.ceil((new Date(g.deadline) - new Date()) / (7 * 86400000)))) : null; return (<div key={g.id} className="goal-card"><div className="goal-header"><div className="goal-name">{g.name}</div><div className="goal-emoji">{g.emoji}</div></div><div className="goal-amounts"><div className="goal-saved">{formatMoney(g.saved, currency)}</div><div className="goal-target">of {formatMoney(g.target, currency)}</div></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div><div className="goal-meta">{pct.toFixed(0)}% complete{weekly !== null && ` · Save ${formatMoney(weekly, currency)}/week`}{g.deadline && ` · Due ${g.deadline}`}</div><button className="btn-outline" style={{ marginTop: 12, width: "100%" }} onClick={() => setShowContributeModal(g)}>+ Add to Goal</button></div>); })}<button className="add-goal-card" onClick={() => setShowModal(true)}><div className="add-goal-icon">+</div><div className="add-goal-text">Add a goal</div></button></div>
-  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "var(--primary)20" : "none", border: `1px solid ${form.emoji === e ? "var(--primary)" : "var(--border)"}`, borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className={`btn-save ${isSaving ? "btn-loading" : ""}`} onClick={handleSave}>{isSaving ? "" : "Save Goal"}</button></div></div></div>)}
-  {showContributeModal && (<div className="modal-overlay" onClick={() => setShowContributeModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add to {showContributeModal.name}</div><label className="modal-label">Amount to contribute ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={contributeAmount} onChange={e => setContributeAmount(e.target.value)} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowContributeModal(null)}>Cancel</button><button className={`btn-save ${isContributing ? "btn-loading" : ""}`} onClick={() => handleContribute(showContributeModal.id)}>{isContributing ? "" : "Contribute"}</button></div></div></div>)}</div>);
+  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "var(--primary)20" : "none", border: `1px solid ${form.emoji === e ? "var(--primary)" : "var(--border)"}`, borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className="btn-save" onClick={handleSave}>Save Goal</button></div></div></div>)}
+  {showContributeModal && (<div className="modal-overlay" onClick={() => setShowContributeModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add to {showContributeModal.name}</div><label className="modal-label">Amount to contribute ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={contributeAmount} onChange={e => setContributeAmount(e.target.value)} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowContributeModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleContribute(showContributeModal.id)}>Contribute</button></div></div></div>)}</div>);
 }
 
 // ─── SETTINGS PAGE ───────────────────────────────────────────────────────────
@@ -3743,39 +3589,28 @@ function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange,
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
   const handleCurrencyChange = (newCurrency) => { if (!currencyConfirmShown) { showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`); setCurrencyConfirmShown(true); } onCurrencyChange(newCurrency); };
   
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
-
   const handleBackup = () => {
-    setIsBackingUp(true);
-    setTimeout(() => {
-      const backupData = { transactions, goals, incomes, budgets, customScenarios, currency, theme, textSize, version: "1.0", exportDate: new Date().toISOString() };
-      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `spendsight_backup_${new Date().toISOString().split("T")[0]}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setIsBackingUp(false);
-      showToast("Backup created!");
-    }, 1000);
+    const backupData = { transactions, goals, incomes, budgets, customScenarios, currency, theme, textSize, version: "1.0", exportDate: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `spendsight_backup_${new Date().toISOString().split("T")[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Backup created!");
   };
   
   const handleRestore = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setIsRestoring(true);
     const reader = new FileReader();
     reader.onload = (ev) => {
-      setTimeout(() => {
-        try {
-          const data = JSON.parse(ev.target.result);
-          onRestoreData(data);
-          showToast("Data restored successfully!");
-        } catch (err) { showToast("Invalid backup file", "error"); }
-        setIsRestoring(false);
-      }, 1500);
+      try {
+        const data = JSON.parse(ev.target.result);
+        onRestoreData(data);
+        showToast("Data restored successfully!");
+      } catch (err) { showToast("Invalid backup file"); }
     };
     reader.readAsText(file);
   };
@@ -3783,7 +3618,7 @@ function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange,
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Settings</div><div className="greeting-tagline">Manage your SpendSight preferences</div></div>
     <div className="settings-section"><div className="settings-title">Account</div><div className="settings-card"><div className="settings-row"><div><div className="settings-row-label">Name</div><div className="settings-row-sub">{user.name}</div></div></div><div className="settings-row"><div><div className="settings-row-label">Email</div><div className="settings-row-sub">{user.email}</div></div></div></div></div>
     <div className="settings-section"><div className="settings-title">Preferences</div><div className="settings-card"><div className="settings-row"><div><div className="settings-row-label">Currency</div><div className="settings-row-sub">All amounts stored and displayed in your chosen currency</div></div><select className="settings-select" value={currency} onChange={e => handleCurrencyChange(e.target.value)}>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div><div className="settings-row"><div><div className="settings-row-label">Text Size</div><div className="settings-row-sub">Adjust font size throughout the app</div></div><div className="text-size-selector"><button className={`size-btn ${textSize === "small" ? "active" : ""}`} onClick={() => onTextSizeChange("small")}>A⁻</button><button className={`size-btn ${textSize === "normal" ? "active" : ""}`} onClick={() => onTextSizeChange("normal")}>A</button><button className={`size-btn ${textSize === "large" ? "active" : ""}`} onClick={() => onTextSizeChange("large")}>A⁺</button><button className={`size-btn ${textSize === "xlarge" ? "active" : ""}`} onClick={() => onTextSizeChange("xlarge")}>A⁺⁺</button></div></div><div className="settings-row"><div><div className="settings-row-label">Theme</div><div className="settings-row-sub">Choose your display preference</div></div><div className="theme-toggle"><button className={`theme-toggle-btn ${theme === "light" ? "active" : ""}`} onClick={() => onThemeChange("light")}>☀️ Light</button><button className={`theme-toggle-btn ${theme === "system" ? "active" : ""}`} onClick={() => onThemeChange("system")}>Auto</button><button className={`theme-toggle-btn ${theme === "dark" ? "active" : ""}`} onClick={() => onThemeChange("dark")}>🌙 Dark</button></div></div></div></div>
-    <div className="settings-section"><div className="settings-title">Data</div><div className="settings-card"><div className="settings-row"><div><div className="settings-row-label">Backup Data</div><div className="settings-row-sub">Download all your data as JSON</div></div><button className={`btn-outline ${isBackingUp ? "btn-loading" : ""}`} onClick={handleBackup}>{isBackingUp ? "" : "Backup"}</button></div><div className="settings-row"><div><div className="settings-row-label">Restore Data</div><div className="settings-row-sub">Upload a backup file to restore</div></div><input type="file" accept=".json" onChange={handleRestore} style={{ display: "none" }} id="restore-input" /><button className={`btn-outline ${isRestoring ? "btn-loading" : ""}`} onClick={() => document.getElementById("restore-input").click()}>{isRestoring ? "" : "Restore"}</button></div><div className="settings-row"><div><div className="settings-row-label">Export CSV</div><div className="settings-row-sub">Download all transactions as CSV</div></div><button className="btn-outline" onClick={() => { const csv = ["Date,Description,Amount,Type,Category,Tags,Notes", ...transactions.map(t => `${t.date},${t.description},${t.amount},${t.type},${t.customCategory || t.category},${(t.tags || []).join(";")},${t.notes || ""}`)].join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `spendsight_export_${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); showToast("Export complete!"); }}>Export CSV</button></div><div className="settings-row"><div><div className="settings-row-label">Clear All Data</div><div className="settings-row-sub">Permanently delete all transactions, goals, and budgets</div></div><button className="btn-danger" onClick={onClearData}>Clear Data</button></div></div></div>
+    <div className="settings-section"><div className="settings-title">Data</div><div className="settings-card"><div className="settings-row"><div><div className="settings-row-label">Backup Data</div><div className="settings-row-sub">Download all your data as JSON</div></div><button className="btn-outline" onClick={handleBackup}>Backup</button></div><div className="settings-row"><div><div className="settings-row-label">Restore Data</div><div className="settings-row-sub">Upload a backup file to restore</div></div><input type="file" accept=".json" onChange={handleRestore} style={{ display: "none" }} id="restore-input" /><button className="btn-outline" onClick={() => document.getElementById("restore-input").click()}>Restore</button></div><div className="settings-row"><div><div className="settings-row-label">Export CSV</div><div className="settings-row-sub">Download all transactions as CSV</div></div><button className="btn-outline" onClick={() => { const csv = ["Date,Description,Amount,Type,Category,Tags,Notes", ...transactions.map(t => `${t.date},${t.description},${t.amount},${t.type},${t.customCategory || t.category},${(t.tags || []).join(";")},${t.notes || ""}`)].join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `spendsight_export_${new Date().toISOString().split("T")[0]}.csv`; a.click(); URL.revokeObjectURL(url); showToast("Export complete!"); }}>Export CSV</button></div><div className="settings-row"><div><div className="settings-row-label">Clear All Data</div><div className="settings-row-sub">Permanently delete all transactions, goals, and budgets</div></div><button className="btn-danger" onClick={onClearData}>Clear Data</button></div></div></div>
     <div className="settings-section"><div className="settings-card"><div className="settings-row"><div><div className="settings-row-label">Sign Out</div></div><button className="btn-cancel" style={{ cursor: "pointer" }} onClick={onLogout}>Sign Out</button></div></div></div></div>);
 }
 
@@ -3804,7 +3639,6 @@ export default function SpendSight() {
   const [authTab, setAuthTab] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState(null);
-  const [processing, setProcessing] = useState({ active: false, text: "", type: "loading" }); // loading or success
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
@@ -3845,59 +3679,22 @@ export default function SpendSight() {
   useEffect(() => { const html = document.documentElement; if (theme === "dark") html.classList.add("dark"); else if (theme === "light") html.classList.remove("dark"); else { const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches; if (prefersDark) html.classList.add("dark"); else html.classList.remove("dark"); } }, [theme]);
   useEffect(() => { if (theme !== "system") return; const mq = window.matchMedia("(prefers-color-scheme: dark)"); const handler = (e) => { if (e.matches) document.documentElement.classList.add("dark"); else document.documentElement.classList.remove("dark"); }; mq.addEventListener("change", handler); return () => mq.removeEventListener("change", handler); }, [theme]);
   
-  const showToast = (msg, type = "success") => { 
-    const icon = type === "success" ? "✅" : "⚠️";
-    setToast({ msg, icon, type }); 
-    setTimeout(() => setToast(null), 3500); 
-  };
-
-  const startProcessing = (text, duration = 1500, onComplete = null) => {
-    setProcessing({ active: true, text, type: "loading" });
-    setTimeout(() => {
-      setProcessing({ active: true, text: "Complete!", type: "success" });
-      setTimeout(() => {
-        setProcessing({ active: false, text: "", type: "loading" });
-        if (onComplete) onComplete();
-      }, 800);
-    }, duration);
-  };
-  const handleAuth = () => { 
-    if (!form.email || !form.password) return; 
-    if (authTab === "signup" && !form.name) return; 
-    const name = authTab === "signup" ? form.name : (form.name || form.email.split("@")[0]); 
-    
-    startProcessing(authTab === "signup" ? "Creating Account..." : "Signing In...", 1200, () => {
-      setUser({ name, email: form.email, income: 0 }); 
-      showToast(`Welcome${authTab === "signup" ? "" : " back"}, ${name}!`); 
-      if (!currency) showToast("Please select your preferred currency from the banner above."); 
-    });
-  };
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
+  const handleAuth = () => { if (!form.email || !form.password) return; if (authTab === "signup" && !form.name) return; const name = authTab === "signup" ? form.name : (form.name || form.email.split("@")[0]); setUser({ name, email: form.email, income: 0 }); showToast(`Welcome${authTab === "signup" ? "" : " back"}, ${name}!`); if (!currency) showToast("💰 Please select your preferred currency from the banner above."); };
   
   const handleUpload = (newTx, fileHash, filename) => {
     const existing = uploadedFiles.find(f => f.hash === fileHash);
-    if (existing) { showToast(`"${filename}" has already been imported.`, "error"); return; }
-    
-    startProcessing("Processing Statement...", 2000, () => {
-      setTransactions(t => [...t, ...newTx]);
-      setUploadedFiles(f => [...f, { name: filename, hash: fileHash, dateUploaded: new Date().toISOString(), txCount: newTx.length }]);
-      setPage("transactions");
-      showToast(`${newTx.length} transactions imported from ${filename}!`);
-    });
+    if (existing) { showToast(`⚠️ "${filename}" has already been imported.`); return; }
+    setTransactions(t => [...t, ...newTx]);
+    setUploadedFiles(f => [...f, { name: filename, hash: fileHash, dateUploaded: new Date().toISOString(), txCount: newTx.length }]);
+    setPage("transactions");
+    showToast(`${newTx.length} transactions imported from ${filename}!`);
   };
   
-  const handleAddIncome = (income) => { 
-    startProcessing("Saving Income...", 800, () => {
-      setIncomes(i => [...i, income]); 
-    });
-  };
+  const handleAddIncome = (income) => { setIncomes(i => [...i, income]); };
   const handleDeleteIncome = (id) => { setIncomes(i => i.filter(inc => inc.id !== id)); showToast("Income entry removed."); };
   const handleUpdateBudgets = (newBudgets) => { setBudgets(newBudgets); };
-  const handleAddScenario = (scenario) => { 
-    startProcessing("Analyzing Scenario...", 1000, () => {
-      setCustomScenarios(s => [...s, scenario]); 
-      showToast("Custom scenario added!"); 
-    });
-  };
+  const handleAddScenario = (scenario) => { setCustomScenarios(s => [...s, scenario]); showToast("Custom scenario added!"); };
   const handleDeleteScenario = (id) => { setCustomScenarios(s => s.filter(sc => sc.id !== id)); showToast("Scenario removed."); };
   
   const handleContributeToGoal = (goalId, amount) => {
@@ -3919,10 +3716,8 @@ export default function SpendSight() {
       incomeType: "",
       isRecurring: false
     };
-    startProcessing("Updating Goal...", 1000, () => {
-      setTransactions(t => [contributionTx, ...t]);
-      showToast(`Added ${formatMoney(amount, currency)} to ${goal.name}`);
-    });
+    setTransactions(t => [contributionTx, ...t]);
+    showToast(`🎯 Added ${formatMoney(amount, currency)} to ${goal.name}`);
   };
   
   const handleRestoreData = (data) => {
@@ -3954,9 +3749,9 @@ export default function SpendSight() {
     { id: "settings", icon: "⚙️", label: "Settings" }
   ];
   
-  if (!user) { return (<><style>{css}</style><div className="auth-screen"><div className="auth-card"><div className="auth-logo"><span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span></div><div className="auth-tagline">Your money, your clarity.</div><div className="auth-tabs"><button className={`auth-tab ${authTab === "login" ? "active" : ""}`} onClick={() => setAuthTab("login")}>Sign In</button><button className={`auth-tab ${authTab === "signup" ? "active" : ""}`} onClick={() => setAuthTab("signup")}>Sign Up</button></div>{authTab === "signup" && (<div className="form-group"><label className="form-label">Your Name</label><input className="form-input" placeholder="e.g. El" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>)}<div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" placeholder="you@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div><button className={`btn-primary ${processing.active ? "btn-loading" : ""}`} onClick={handleAuth}>{authTab === "login" ? "Sign In →" : "Create Account →"}</button></div></div>{processing.active && (<div className="processing-overlay"><div className="processing-card">{processing.type === "loading" ? <div className="loader-ring" /> : <div className="success-check">✓</div>}<div className="processing-text">{processing.text}</div></div></div>)}{toast && <div className={`toast ${toast.type}`}><span className="toast-icon">{toast.icon}</span>{toast.msg}</div>}</>); }
-  if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--text-muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`Currency selected: ${CURRENCIES[e.target.value].name}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className={`toast ${toast.type}`}><span className="toast-icon">{toast.icon}</span>{toast.msg}</div>}</>); }
+  if (!user) { return (<><style>{css}</style><div className="auth-screen"><div className="auth-card"><div className="auth-logo"><span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span></div><div className="auth-tagline">Your money, your clarity.</div><div className="auth-tabs"><button className={`auth-tab ${authTab === "login" ? "active" : ""}`} onClick={() => setAuthTab("login")}>Sign In</button><button className={`auth-tab ${authTab === "signup" ? "active" : ""}`} onClick={() => setAuthTab("signup")}>Sign Up</button></div>{authTab === "signup" && (<div className="form-group"><label className="form-label">Your Name</label><input className="form-input" placeholder="e.g. El" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>)}<div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" placeholder="you@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div><button className="btn-primary" onClick={handleAuth}>{authTab === "login" ? "Sign In →" : "Create Account →"}</button></div></div>{toast && <div className="toast">{toast}</div>}</>); }
+  if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--text-muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
   if (sessionExpired) { return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>); }
   
-  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => { startProcessing("Creating Goal...", 800, () => setGoals(gs => [...gs, g])); }} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{processing.active && (<div className="processing-overlay"><div className="processing-card">{processing.type === "loading" ? <div className="loader-ring" /> : <div className="success-check">✓</div>}<div className="processing-text">{processing.text}</div></div></div>)}{toast && <div className={`toast ${toast.type}`}><span className="toast-icon">{toast.icon}</span>{toast.msg}</div>}</>);
-} 
+  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
+}
