@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { createWorker } from "tesseract.js";
 
-// ─── CONFIG ──────────────────────────────────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+// ─── CURRENCY CONFIG ──────────────────────────────────────────────────────────
 const EXCHANGE_RATES = {
   BWP: 1,
   ZAR: 1.26,
@@ -18,7 +22,41 @@ const CURRENCIES = {
   GBP: { symbol: "£",  name: "GBP — Pound",   code: "GBP" },
 };
 
-const DEFAULT_CATEGORIES = [
+function convertCurrency(amount, fromCurrency, toCurrency) {
+  if (fromCurrency === toCurrency) return amount;
+  const amountInBWP = amount / EXCHANGE_RATES[fromCurrency];
+  return amountInBWP * EXCHANGE_RATES[toCurrency];
+}
+
+function formatMoney(amount, currencyCode) {
+  const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
+  return `${c.symbol} ${amount.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+const COLORS = {
+  navy: "#1A1A2E",
+  navyDeep: "#0F0F1A",
+  mint: "#00C896",
+  mintDim: "#00C89620",
+  bg: "#F7F9FC",
+  surface: "#FFFFFF",
+  danger: "#FF4757",
+  text: "#2D3748",
+  textMuted: "#718096",
+  border: "#E2E8F0",
+};
+
+const taglines = [
+  "Here's where your money went this month.",
+  "Small steps, big savings.",
+  "Your money, your clarity.",
+  "Know more. Spend smarter.",
+  "Every pula tells a story.",
+];
+
+// Updated CATEGORIES with Savings as a default category
+const CATEGORIES = [
   { name: "Groceries",    icon: "🛒", color: "#00C896" },
   { name: "Transport",    icon: "🚗", color: "#4299E1" },
   { name: "Entertainment",icon: "🎬", color: "#9F7AEA" },
@@ -30,16 +68,7 @@ const DEFAULT_CATEGORIES = [
   { name: "Other",        icon: "📦", color: "#CBD5E0" },
 ];
 
-const taglines = [
-  "Here's where your money went this month.",
-  "Small steps, big savings.",
-  "Your money, your clarity.",
-  "Know more. Spend smarter.",
-  "Every pula tells a story.",
-];
-
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -60,6 +89,7 @@ function getTxTags(tx) { return tx.tags || []; }
 function getTxNotes(tx) { return tx.notes || ""; }
 function getTxSplits(tx) { return tx.splits || []; }
 function getTxIncomeType(tx) { return tx.incomeType || ""; }
+function getTxIsRecurring(tx) { return tx.isRecurring || false; }
 
 function getWeekNumber(date) {
   const d = new Date(date);
@@ -82,199 +112,7 @@ function simpleHash(str) {
   return Math.abs(hash).toString(36);
 }
 
-function formatMoney(amount, currencyCode) {
-  const c = CURRENCIES[currencyCode] || CURRENCIES.BWP;
-  return `${c.symbol} ${amount.toLocaleString("en-BW", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function convertCurrency(amount, fromCurrency, toCurrency) {
-  if (fromCurrency === toCurrency) return amount;
-  const amountInBWP = amount / EXCHANGE_RATES[fromCurrency];
-  return amountInBWP * EXCHANGE_RATES[toCurrency];
-}
-
-// ─── AI SERVICE — MOCK (Security Fix: No hardcoded API keys) ──────────────
-
-// SECURITY FIX: Removed hardcoded NVIDIA API key
-// The app now uses a mock AI service that simulates responses locally
-// No external API calls, no API key exposure, works offline
-
-function callAIService(prompt) {
-  // Mock response generator based on prompt content
-  const mockResponses = {
-    advisor: {
-      summary: "Your spending this month is within your income range.",
-      opportunity: "Consider reviewing your Groceries category to find potential savings.",
-      encouragement: "Every small step counts toward financial freedom!"
-    },
-    weeklyReport: {
-      topCategory: "Groceries",
-      trend: "stable",
-      assessment: "Your spending is stable — good job!",
-      recommendations: [
-        "Review your subscriptions for unused services.",
-        "Set up automatic transfers to your savings account."
-      ]
-    }
-  };
-  
-  // Return appropriate mock based on prompt keywords
-  if (prompt.includes("financial advisor") || prompt.includes("spending data")) {
-    return mockResponses.advisor;
-  }
-  if (prompt.includes("weekly report") || prompt.includes("spending report")) {
-    return mockResponses.weeklyReport;
-  }
-  
-  return {
-    summary: "I've analyzed your financial data.",
-    opportunity: "Review your top spending categories for potential savings.",
-    encouragement: "Keep tracking your finances!"
-  };
-}
-
-// ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────────
-
-function calculateFinancialHealth(transactions, incomes, goals, budgets) {
-  const hasData = transactions.length > 0 || incomes.length > 0 || goals.length > 0;
-  
-  if (!hasData) {
-    return {
-      score: 0,
-      grade: "No Data",
-      savingsRate: 0,
-      savingsScore: 0,
-      budgetScore: 0,
-      stabilityScore: 0,
-      goalScore: 0,
-      debtScore: 0,
-      riskLevel: "gray",
-      riskLabel: "No Data",
-      riskFactors: [],
-      totalIncome: 0,
-      totalSpent: 0,
-      savings: 0,
-      monthOverMonthChange: 0,
-      hasData: false
-    };
-  }
-  
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  
-  const monthTxs = transactions.filter(t => {
-    const d = new Date(t.date);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  });
-  
-  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-  const prevMonthTxs = transactions.filter(t => {
-    const d = new Date(t.date);
-    return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
-  });
-  
-  const monthlyIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
-  const creditTransactions = monthTxs.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
-  const totalIncome = monthlyIncome + creditTransactions;
-  const totalSpent = monthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
-  const savings = Math.max(0, totalIncome - totalSpent);
-  const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
-  
-  const savingsScore = Math.min(100, (savingsRate / 20) * 100);
-  
-  let budgetScore = 0;
-  if (budgets.length > 0) {
-    const categorySpending = {};
-    monthTxs.filter(t => t.type === "debit").forEach(t => {
-      const cat = t.customCategory || t.category;
-      categorySpending[cat] = (categorySpending[cat] || 0) + t.amount;
-    });
-    
-    let totalBudget = 0;
-    let totalSpentBudgeted = 0;
-    budgets.forEach(b => {
-      const spent = categorySpending[b.category] || 0;
-      totalBudget += b.amount;
-      totalSpentBudgeted += Math.min(spent, b.amount);
-    });
-    
-    budgetScore = totalBudget > 0 ? (totalSpentBudgeted / totalBudget) * 100 : 100;
-    budgetScore = Math.min(100, budgetScore);
-  }
-  
-  const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
-  let stabilityScore = 100;
-  if (prevMonthSpent > 0 && totalSpent > 0) {
-    const variance = Math.abs((totalSpent - prevMonthSpent) / prevMonthSpent);
-    stabilityScore = Math.max(0, 100 - (variance * 100));
-    stabilityScore = Math.min(100, stabilityScore);
-  } else if (totalSpent > 0 && prevMonthSpent === 0) {
-    stabilityScore = 50;
-  }
-  
-  let goalScore = 0;
-  if (goals.length > 0) {
-    const goalProgress = goals.reduce((sum, g) => {
-      const pct = g.target > 0 ? (g.saved / g.target) * 100 : 0;
-      return sum + Math.min(pct, 100);
-    }, 0);
-    goalScore = goalProgress / goals.length;
-  }
-  
-  const totalCredit = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
-  const debtScore = totalIncome > 0 ? Math.max(0, 100 - (totalCredit / totalIncome) * 100) : 100;
-  
-  const weights = { savings: 0.30, budget: 0.25, stability: 0.20, goals: 0.15, debt: 0.10 };
-  const overallScore = Math.round(
-    savingsScore * weights.savings +
-    budgetScore * weights.budget +
-    stabilityScore * weights.stability +
-    goalScore * weights.goals +
-    debtScore * weights.debt
-  );
-  
-  const riskFactors = [];
-  if (savingsRate < 10 && totalIncome > 0) riskFactors.push("Low savings rate");
-  if (budgetScore < 70 && budgetScore > 0) riskFactors.push("Budget overruns");
-  if (stabilityScore < 60 && stabilityScore > 0) riskFactors.push("Unstable spending");
-  if (debtScore < 50 && totalIncome > 0) riskFactors.push("High debt burden");
-  
-  let riskLevel = "green";
-  let riskLabel = "Low Risk";
-  if (riskFactors.length >= 3) { riskLevel = "red"; riskLabel = "High Risk"; }
-  else if (riskFactors.length >= 1) { riskLevel = "yellow"; riskLabel = "Medium Risk"; }
-  
-  let grade = "F";
-  if (overallScore >= 95) grade = "A+";
-  else if (overallScore >= 85) grade = "A";
-  else if (overallScore >= 70) grade = "B";
-  else if (overallScore >= 55) grade = "C";
-  else if (overallScore >= 40) grade = "D";
-  
-  return {
-    score: overallScore,
-    grade,
-    savingsRate: Math.round(savingsRate),
-    savingsScore: Math.round(savingsScore),
-    budgetScore: Math.round(budgetScore),
-    stabilityScore: Math.round(stabilityScore),
-    goalScore: Math.round(goalScore),
-    debtScore: Math.round(debtScore),
-    riskLevel,
-    riskLabel,
-    riskFactors,
-    totalIncome,
-    totalSpent,
-    savings,
-    monthOverMonthChange: prevMonthSpent > 0 ? Math.round(((totalSpent - prevMonthSpent) / prevMonthSpent) * 100) : 0,
-    hasData: true
-  };
-}
-
-// ─── CSV PARSING ──────────────────────────────────────────────────────────────
-
+// Parse CSV with flexible column detection
 function parseCSV(csvText) {
   const lines = csvText.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -318,10 +156,10 @@ function parseCSV(csvText) {
     
     transactions.push({
       id: simpleHash(`${description}-${amount}-${date}-${i}`),
-      date,
+      date: date,
       description: description.substring(0, 50),
-      amount,
-      type,
+      amount: amount,
+      type: type,
       category: "Other",
       customCategory: "",
       tags: [],
@@ -334,55 +172,328 @@ function parseCSV(csvText) {
   return transactions;
 }
 
-// ─── STYLES ──────────────────────────────────────────────────────────────────
+// ─── AI SERVICE ──────────────────────────────────────────────────────────────
+// AI calls go through YOUR backend proxy — the NVIDIA key lives server-side only
+// (env var), never in this client bundle. Point this at your Flask backend.
+const AI_BACKEND_URL = (typeof process !== 'undefined' && process.env?.REACT_APP_AI_BACKEND_URL)
+  || '/api/ai/advise'; // adjust to match your Flask route
 
+async function callNVIDIA(prompt, systemPrompt = null) {
+  try {
+    const response = await fetch(AI_BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, systemPrompt })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('AI backend error:', errorText);
+      return { error: true, message: "AI service is temporarily unavailable. Please try again shortly." };
+    }
+
+    return await response.json(); // backend returns parsed JSON (or { raw } / { error })
+
+  } catch (error) {
+    console.error('AI service error:', error);
+    return { error: true, message: "Couldn't reach the AI service. Check your connection and try again." };
+  }
+}
+
+// ─── DOCUMENT EXTRACTION (PDF text layer → OCR fallback → AI structuring) ──
+
+// 1. Try to pull a real text layer out of the PDF (works for digital statements).
+async function extractTextFromPDF(file) {
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(item => item.str).join(" ") + "\n";
+  }
+  return { text: text.trim(), pdf };
+}
+
+// 2. If the text layer is empty/garbage (scanned PDF), rasterize each page and OCR it.
+async function ocrPDFPages(pdf, onProgress) {
+  const worker = await createWorker("eng");
+  let text = "";
+  try {
+    for (let i = 1; i <= pdf.numPages; i++) {
+      onProgress?.(`Running OCR on page ${i} of ${pdf.numPages}...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d");
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      text += data.text + "\n";
+    }
+  } finally {
+    await worker.terminate();
+  }
+  return text.trim();
+}
+
+// 3. OCR a single image file (receipt scan).
+async function ocrImage(file, onProgress) {
+  const worker = await createWorker("eng");
+  try {
+    onProgress?.("Running OCR on receipt...");
+    const dataUrl = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = e => res(e.target.result);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+    const { data } = await worker.recognize(dataUrl);
+    return data.text.trim();
+  } finally {
+    await worker.terminate();
+  }
+}
+
+// 4. Hand the raw extracted text to the AI backend to structure it into transactions.
+// Throws on failure — callers must surface the error, never substitute fake data.
+async function extractTransactionsViaAI(rawText, currency) {
+  if (!rawText || rawText.replace(/\s/g, "").length < 10) {
+    throw new Error("No readable text was found in this document.");
+  }
+  const response = await fetch(AI_BACKEND_URL.replace("/advise", "/extract-transactions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: rawText, currency })
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(errText || "AI extraction failed.");
+  }
+  const result = await response.json();
+  if (result.error) throw new Error(result.message || "AI extraction failed.");
+  if (!Array.isArray(result.transactions)) throw new Error("AI returned an unexpected format.");
+  if (result.transactions.length === 0) throw new Error("No transactions could be identified in this document.");
+
+  return result.transactions.map((t, i) => {
+    const amount = parseFloat(t.amount);
+    if (!t.description || isNaN(amount)) return null;
+    return {
+      id: `extracted-${Date.now()}-${i}`,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : new Date().toISOString().split("T")[0],
+      description: String(t.description).slice(0, 100),
+      amount: Math.abs(amount),
+      type: t.type === "credit" ? "credit" : "debit",
+      category: CATEGORIES.find(c => c.name === t.category)?.name || "Other",
+      customCategory: "",
+      tags: [], notes: "", splits: [],
+      incomeType: t.type === "credit" ? "Other" : "",
+      isRecurring: false
+    };
+  }).filter(Boolean);
+}
+
+// 5. Full pipeline for an uploaded PDF: text layer → OCR fallback → AI structuring.
+async function extractTransactionsFromPDF(file, currency, onProgress) {
+  onProgress?.("Reading PDF...");
+  const { text, pdf } = await extractTextFromPDF(file);
+
+  let finalText = text;
+  // Heuristic: a real statement has way more than a few characters of text per page.
+  if (text.length < 40 * pdf.numPages) {
+    onProgress?.("No text layer found — this looks like a scanned PDF.");
+    finalText = await ocrPDFPages(pdf, onProgress);
+  }
+
+  onProgress?.("Asking AI to structure the transactions...");
+  return extractTransactionsViaAI(finalText, currency);
+}
+
+// 6. Full pipeline for a scanned receipt image.
+async function extractTransactionFromReceipt(file, currency, onProgress) {
+  const text = await ocrImage(file, onProgress);
+  onProgress?.("Asking AI to structure the receipt...");
+  const transactions = await extractTransactionsViaAI(text, currency);
+  return transactions[0] || null;
+}
+
+// ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────
+
+function calculateFinancialHealth(transactions, incomes, goals, budgets) {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const hasAnyData = transactions.length > 0 || incomes.length > 0 || goals.length > 0 || budgets.length > 0;
+  if (!hasAnyData) {
+    return {
+      hasData: false,
+      score: null,
+      grade: null,
+      savingsRate: 0, savingsScore: null, budgetScore: null, stabilityScore: null, goalScore: null, debtScore: null,
+      riskLevel: "none", riskLabel: "No data yet", riskFactors: [],
+      totalIncome: 0, totalSpent: 0, savings: 0, monthOverMonthChange: 0
+    };
+  }
+
+  const monthTxs = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  const prevMonthTxs = transactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+  });
+
+  const monthlyIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
+  const creditTransactions = monthTxs.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = monthlyIncome + creditTransactions;
+  const totalSpent = monthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
+  const savings = Math.max(0, totalIncome - totalSpent);
+  const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+
+  // Each component is only scored if there's real data behind it — no silent defaults.
+  const hasSavingsData = totalIncome > 0;
+  const savingsScore = hasSavingsData ? Math.min(100, (savingsRate / 20) * 100) : null;
+
+  const hasBudgetData = budgets.length > 0;
+  let budgetScore = null;
+  if (hasBudgetData) {
+    const categorySpending = {};
+    monthTxs.filter(t => t.type === "debit").forEach(t => {
+      const cat = t.customCategory || t.category;
+      categorySpending[cat] = (categorySpending[cat] || 0) + t.amount;
+    });
+    let totalBudget = 0;
+    let totalSpentBudgeted = 0;
+    budgets.forEach(b => {
+      const spent = categorySpending[b.category] || 0;
+      totalBudget += b.amount;
+      totalSpentBudgeted += Math.min(spent, b.amount);
+    });
+    budgetScore = totalBudget > 0 ? Math.min(100, (totalSpentBudgeted / totalBudget) * 100) : null;
+    if (budgetScore !== null) budgetScore = Math.round(budgetScore);
+  }
+
+  const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
+  const hasStabilityData = prevMonthSpent > 0 && totalSpent > 0;
+  let stabilityScore = null;
+  if (hasStabilityData) {
+    const variance = Math.abs((totalSpent - prevMonthSpent) / prevMonthSpent);
+    stabilityScore = Math.min(100, Math.max(0, 100 - (variance * 100)));
+  }
+
+  const hasGoalData = goals.length > 0;
+  let goalScore = null;
+  if (hasGoalData) {
+    const goalProgress = goals.reduce((sum, g) => {
+      const pct = g.target > 0 ? (g.saved / g.target) * 100 : 0;
+      return sum + Math.min(pct, 100);
+    }, 0);
+    goalScore = goalProgress / goals.length;
+  }
+
+  const totalCredit = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
+  const hasDebtData = totalIncome > 0;
+  const debtScore = hasDebtData ? Math.max(0, 100 - (totalCredit / totalIncome) * 100) : null;
+
+  const components = [
+    { score: savingsScore, weight: 0.30 },
+    { score: budgetScore, weight: 0.25 },
+    { score: stabilityScore, weight: 0.20 },
+    { score: goalScore, weight: 0.15 },
+    { score: debtScore, weight: 0.10 },
+  ].filter(c => c.score !== null);
+
+  const activeWeight = components.reduce((sum, c) => sum + c.weight, 0);
+  const overallScore = activeWeight > 0
+    ? Math.round(components.reduce((sum, c) => sum + c.score * c.weight, 0) / activeWeight)
+    : null;
+
+  const riskFactors = [];
+  if (hasSavingsData && savingsRate < 10) riskFactors.push("Low savings rate");
+  if (hasBudgetData && budgetScore < 70) riskFactors.push("Budget overruns");
+  if (hasStabilityData && stabilityScore < 60) riskFactors.push("Unstable spending");
+  if (hasDebtData && debtScore < 50) riskFactors.push("High debt burden");
+
+  let riskLevel = "green";
+  let riskLabel = "Low Risk";
+  if (overallScore === null) {
+    riskLevel = "none"; riskLabel = "Not enough data";
+  } else if (riskFactors.length >= 3) { riskLevel = "red"; riskLabel = "High Risk"; }
+  else if (riskFactors.length >= 1) { riskLevel = "yellow"; riskLabel = "Medium Risk"; }
+
+  let grade = null;
+  if (overallScore !== null) {
+    grade = "F";
+    if (overallScore >= 95) grade = "A+";
+    else if (overallScore >= 85) grade = "A";
+    else if (overallScore >= 70) grade = "B";
+    else if (overallScore >= 55) grade = "C";
+    else if (overallScore >= 40) grade = "D";
+  }
+
+  return {
+    hasData: true,
+    score: overallScore,
+    grade: grade,
+    savingsRate: Math.round(savingsRate),
+    savingsScore: savingsScore !== null ? Math.round(savingsScore) : null,
+    budgetScore: budgetScore,
+    stabilityScore: stabilityScore !== null ? Math.round(stabilityScore) : null,
+    goalScore: goalScore !== null ? Math.round(goalScore) : null,
+    debtScore: debtScore !== null ? Math.round(debtScore) : null,
+    riskLevel: riskLevel,
+    riskLabel: riskLabel,
+    riskFactors: riskFactors,
+    totalIncome: totalIncome,
+    totalSpent: totalSpent,
+    savings: savings,
+    monthOverMonthChange: prevMonthSpent > 0 ? Math.round(((totalSpent - prevMonthSpent) / prevMonthSpent) * 100) : 0
+  };
+}
+
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const css = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* ── ACCESSIBILITY: Reduced motion ── */
-  @media (prefers-reduced-motion: reduce) {
-    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-  }
-
   :root {
-    /* OKLCH-based colors — perceptually uniform */
-    --primary: #00C896;
-    --primary-hover: #00E0AA;
-    --secondary: #1A1A2E;
-    --secondary-light: #2D3748;
-    --success: #2ECC71;
-    --error: #FF4757;
-    --warning: #F6C90E;
-    --warning-dark: #D4A800;
-    --neutral: #777777;
-    --surface: #F7F9FC;
-    --surface-dark: #0F0F1A;
-    --text: #2D3748;
-    --text-light: #E2E8F0;
-    --text-muted: #718096;
-    --border: #E2E8F0;
+    --navy: #1A1A2E;
+    --navy-deep: #0F0F1A;
+    --mint: #00C896;
     --bg: #F7F9FC;
+    --surface: #FFFFFF;
+    --danger: #FF4757;
+    --text: #2D3748;
+    --muted: #718096;
+    --border: #E2E8F0;
+    --stat-value: #1A1A2E;
+    --greeting-name: #1A1A2E;
+    --card-bg: #FFFFFF;
+    --text-scale: 1;
     --risk-green: #00C896;
     --risk-yellow: #F6C90E;
-    --risk-yellow-dark: #D4A800;
     --risk-red: #FF4757;
-    --risk-gray: #A0AEC0;
-    --text-scale: 1;
   }
 
   html.dark {
     --bg: #0F0F1A;
     --surface: #1A1A2E;
     --text: #E2E8F0;
-    --text-muted: #A0AEC0;
+    --muted: #A0AEC0;
     --border: #2D3748;
+    --stat-value: #E2E8F0;
+    --greeting-name: #00C896;
+    --card-bg: #1A1A2E;
     --risk-green: #00E0AA;
     --risk-yellow: #F6C90E;
     --risk-red: #FF6B7A;
-    --primary: #00E0AA;
-    --warning: #F6C90E;
   }
 
   html.text-small { --text-scale: 0.85; }
@@ -397,265 +508,103 @@ const css = `
     min-height: 100vh;
     transition: background 0.25s, color 0.25s;
     font-size: calc(14px * var(--text-scale));
-    -webkit-tap-highlight-color: transparent;
   }
 
-  input, select, button, textarea {
-    -webkit-appearance: none;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    touch-action: manipulation;
-  }
+  input, select, button, textarea { -webkit-appearance: none; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); }
 
-  /* ── SIDEBAR ── */
   .app { display: flex; min-height: 100vh; }
 
   .sidebar {
-    width: 240px;
-    min-height: 100vh;
-    background: var(--secondary);
-    display: flex;
-    flex-direction: column;
-    padding: 32px 0;
-    position: fixed;
-    left: 0;
-    top: 0;
-    z-index: 100;
+    width: 240px; min-height: 100vh; background: var(--navy-deep);
+    display: flex; flex-direction: column; padding: 32px 0;
+    position: fixed; left: 0; top: 0; z-index: 100;
     transition: transform 0.3s ease;
-    pointer-events: none;
   }
-  .sidebar.open { pointer-events: all; }
   .sidebar-logo { padding: 0 24px 32px; border-bottom: 1px solid #ffffff10; }
-  .logo-text {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(22px * var(--text-scale));
-    font-weight: 800;
-    color: white;
-    letter-spacing: -0.5px;
-  }
-  .logo-dot { color: var(--primary); }
-
-  .sidebar-nav {
-    flex: 1;
-    padding: 24px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
+  .logo-text { font-family: 'Syne', sans-serif; font-size: calc(22px * var(--text-scale)); font-weight: 800; color: white; letter-spacing: -0.5px; }
+  .logo-dot { color: var(--mint); }
+  .sidebar-nav { flex: 1; padding: 24px 12px; display: flex; flex-direction: column; gap: 4px; }
   .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: #ffffff60;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 500;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-radius: 10px; cursor: pointer; transition: all 0.2s;
+    color: #ffffff60; font-size: calc(14px * var(--text-scale)); font-weight: 500;
+    border: none; background: none; width: 100%; text-align: left;
   }
   .nav-item:hover { background: #ffffff10; color: white; }
-  .nav-item.active { background: #00C89615; color: var(--primary); }
+  .nav-item.active { background: #00C89615; color: var(--mint); }
   .nav-item .nav-icon { font-size: calc(18px * var(--text-scale)); width: 24px; text-align: center; }
-
   .sidebar-footer { padding: 24px; border-top: 1px solid #ffffff10; }
-  .user-chip {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #ffffff08;
-    border-radius: 8px;
-    padding: 10px 12px;
-  }
-  .user-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: calc(13px * var(--text-scale));
-    color: var(--secondary);
-    flex-shrink: 0;
-  }
+  .user-chip { display: flex; align-items: center; gap: 10px; background: #ffffff08; border-radius: 10px; padding: 10px 12px; }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--mint); display: flex; align-items: center; justify-content: center; font-family: 'Syne', sans-serif; font-weight: 700; font-size: calc(13px * var(--text-scale)); color: var(--navy-deep); flex-shrink: 0; }
   .user-name { color: white; font-size: calc(13px * var(--text-scale)); font-weight: 500; }
 
-  /* ── MOBILE HEADER ── */
   .mobile-header {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 200;
-    background: var(--secondary);
-    padding: 16px 20px;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid #ffffff10;
-    height: 60px;
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: var(--navy-deep); padding: 16px 20px;
+    align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #ffffff10; height: 60px;
   }
-  .hamburger {
-    background: none;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 4px;
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
+  .hamburger { background: none; border: none; cursor: pointer; display: flex; flex-direction: column; gap: 5px; padding: 4px; }
   .hamburger span { display: block; width: 22px; height: 2px; background: white; border-radius: 2px; }
-  .mobile-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: #00000080;
-    z-index: 150;
-    pointer-events: none;
-  }
+  .mobile-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 150; pointer-events: none; }
   .mobile-overlay.open { display: block; pointer-events: all; }
 
-  .main {
-    margin-left: 240px;
-    flex: 1;
-    padding: 40px;
-    min-height: 100vh;
-    background: var(--bg);
-    pointer-events: all;
-  }
+  .main { margin-left: 240px; flex: 1; padding: 40px; min-height: 100vh; background: var(--bg); }
 
-  /* ── AUTH SCREEN ── */
-  .auth-screen {
-    min-height: 100vh;
-    background: var(--secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+  .install-banner {
+    position: fixed; bottom: 20px; left: 260px; right: 20px; background: var(--navy-deep);
+    border-radius: 12px; padding: 12px 20px; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px; z-index: 400;
+    border-left: 3px solid var(--mint); box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  .install-banner p { color: white; font-size: calc(13px * var(--text-scale)); margin: 0; }
+  .install-banner button { padding: 6px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+  .install-btn { background: var(--mint); color: var(--navy-deep); }
+  .dismiss-btn { background: none; color: var(--muted); border: 1px solid var(--border) !important; }
+  @media (max-width: 768px) { .install-banner { left: 20px; } }
+
+  .session-overlay {
+    position: fixed; inset: 0; background: var(--navy-deep); z-index: 600;
+    display: flex; align-items: center; justify-content: center;
     background-image: radial-gradient(ellipse at 20% 50%, #00C89610 0%, transparent 60%),
                       radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%);
   }
-  .auth-card {
-    background: var(--secondary);
-    border: 1px solid #ffffff10;
-    border-radius: 12px;
-    padding: 48px 40px;
-    width: 100%;
-    max-width: 420px;
-    box-shadow: 0 40px 80px #00000060;
+  .session-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 400px; text-align: center; }
+  .session-logo { font-family: 'Syne', sans-serif; font-size: calc(32px * var(--text-scale)); font-weight: 800; color: white; margin-bottom: 24px; }
+  .session-message { color: #ffffffb0; font-size: calc(14px * var(--text-scale)); margin-bottom: 32px; }
+  .session-btn { padding: 14px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 12px; font-family: 'Syne', sans-serif; font-weight: 700; font-size: calc(16px * var(--text-scale)); cursor: pointer; }
+
+  .auth-screen {
+    min-height: 100vh; background: var(--navy-deep);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    background-image: radial-gradient(ellipse at 20% 50%, #00C89610 0%, transparent 60%),
+                      radial-gradient(ellipse at 80% 20%, #4299E110 0%, transparent 60%);
   }
+  .auth-card { background: var(--navy); border: 1px solid #ffffff10; border-radius: 20px; padding: 48px 40px; width: 100%; max-width: 420px; box-shadow: 0 40px 80px #00000060; }
   .auth-logo { text-align: center; margin-bottom: 8px; }
-  .auth-logo-text {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(28px * var(--text-scale));
-    font-weight: 800;
-    color: white;
-  }
-  .auth-tagline {
-    text-align: center;
-    color: #ffffff50;
-    font-size: calc(13px * var(--text-scale));
-    margin-bottom: 36px;
-  }
-  .auth-tabs {
-    display: flex;
-    background: #ffffff08;
-    border-radius: 8px;
-    padding: 4px;
-    margin-bottom: 28px;
-  }
-  .auth-tab {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 500;
-    background: none;
-    color: #ffffff50;
-    transition: all 0.2s;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .auth-tab.active { background: var(--primary); color: var(--secondary); }
+  .auth-logo-text { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 800; color: white; }
+  .auth-tagline { text-align: center; color: #ffffff50; font-size: calc(13px * var(--text-scale)); margin-bottom: 36px; }
+  .auth-tabs { display: flex; background: #ffffff08; border-radius: 10px; padding: 4px; margin-bottom: 28px; }
+  .auth-tab { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 500; background: none; color: #ffffff50; transition: all 0.2s; }
+  .auth-tab.active { background: var(--mint); color: var(--navy-deep); }
   .form-group { margin-bottom: 16px; }
-  .form-label {
-    display: block;
-    color: #ffffff70;
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 500;
-    margin-bottom: 8px;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-  }
-  .form-input {
-    width: 100%;
-    padding: 14px 16px;
-    background: #ffffff08;
-    border: 1px solid #ffffff15;
-    border-radius: 8px;
-    color: white;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    outline: none;
-    transition: all 0.2s;
-    min-height: 48px;
-  }
-  .form-input:focus { border-color: var(--primary); background: #ffffff10; }
+  .form-label { display: block; color: #ffffff70; font-size: calc(12px * var(--text-scale)); font-weight: 500; margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .form-input { width: 100%; padding: 14px 16px; background: #ffffff08; border: 1px solid #ffffff15; border-radius: 10px; color: white; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); outline: none; transition: all 0.2s; }
+  .form-input:focus { border-color: var(--mint); background: #ffffff10; }
   .form-input::placeholder { color: #ffffff30; }
-  .btn-primary {
-    width: 100%;
-    padding: 15px;
-    background: var(--primary);
-    color: var(--secondary);
-    border: none;
-    border-radius: 8px;
-    font-family: 'Syne', sans-serif;
-    font-size: calc(15px * var(--text-scale));
-    font-weight: 700;
-    cursor: pointer;
-    margin-top: 8px;
-    transition: all 0.2s;
-    min-height: 48px;
-    touch-action: manipulation;
-  }
-  .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+  .btn-primary { width: 100%; padding: 15px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; cursor: pointer; margin-top: 8px; transition: all 0.2s; }
+  .btn-primary:hover { background: #00e0aa; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
 
-  /* ── PAGE LAYOUT ── */
   .page-header { margin-bottom: 32px; }
-  .greeting {
-    font-family: 'Syne', sans-serif;
-    font-size: clamp(28px, 4vw, 44px);
-    font-weight: 700;
-    color: var(--text);
-  }
-  .greeting-name { color: var(--primary); }
-  .greeting-tagline {
-    color: var(--text-muted);
-    font-size: clamp(14px, 1.2vw, 16px);
-    margin-top: 4px;
-  }
+  .greeting { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 700; color: var(--text); }
+  .greeting-name { color: var(--greeting-name); }
+  .greeting-tagline { color: var(--muted); font-size: calc(15px * var(--text-scale)); margin-top: 4px; }
 
-  /* ── CURRENCY BANNER ── */
   .currency-banner {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 14px;
     padding: 16px 24px;
     margin-bottom: 24px;
     display: flex;
@@ -664,66 +613,34 @@ const css = `
     flex-wrap: wrap;
     gap: 16px;
   }
-  .currency-banner-label {
-    font-size: calc(13px * var(--text-scale));
-    color: var(--text-muted);
-  }
-  .currency-banner-value {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    color: var(--primary);
-    font-size: calc(14px * var(--text-scale));
-  }
-  .currency-selector {
-    padding: 8px 16px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    cursor: pointer;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
+  .currency-banner-label { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .currency-banner-value { font-family: 'Syne', sans-serif; font-weight: 700; color: var(--mint); font-size: calc(14px * var(--text-scale)); }
+  .currency-selector { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
 
-  /* ── AI ADVISOR ── */
   .ai-advisor-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    background: linear-gradient(135deg, var(--mint)10, var(--surface));
+    border: 1px solid var(--mint);
+    border-radius: 16px;
     padding: 20px 24px;
     margin-bottom: 24px;
     position: relative;
-    border-left: 3px solid var(--primary);
+    overflow: hidden;
   }
   .ai-advisor-header {
     display: flex;
     align-items: center;
     gap: 12px;
     margin-bottom: 12px;
-    flex-wrap: wrap;
   }
   .ai-advisor-badge {
-    background: var(--primary);
-    color: var(--secondary);
+    background: var(--mint);
+    color: var(--navy-deep);
     padding: 2px 12px;
-    border-radius: 4px;
+    border-radius: 20px;
     font-size: calc(10px * var(--text-scale));
     font-weight: 700;
     text-transform: uppercase;
   }
-  .ai-advisor-status {
-    padding: 2px 10px;
-    border-radius: 4px;
-    font-size: calc(10px * var(--text-scale));
-    font-weight: 600;
-  }
-  .ai-advisor-status.ready { background: var(--neutral); color: white; }
-  .ai-advisor-status.thinking { background: var(--warning); color: var(--secondary); }
-  .ai-advisor-status.live { background: var(--primary); color: var(--secondary); }
-  .ai-advisor-status.error { background: var(--error); color: white; }
-  .ai-advisor-status.offline { background: var(--error); color: white; }
   .ai-advisor-summary {
     font-size: calc(16px * var(--text-scale));
     font-weight: 600;
@@ -737,25 +654,23 @@ const css = `
   }
   .ai-advisor-encouragement {
     font-size: calc(14px * var(--text-scale));
-    color: var(--primary);
+    color: var(--mint);
     font-weight: 500;
   }
   .ai-advisor-refresh {
     background: none;
     border: none;
-    color: var(--text-muted);
+    color: var(--muted);
     cursor: pointer;
     font-size: calc(12px * var(--text-scale));
     padding: 4px 12px;
-    border-radius: 4px;
-    min-height: 44px;
-    touch-action: manipulation;
+    border-radius: 8px;
   }
   .ai-advisor-refresh:hover { background: var(--bg); }
 
   .ai-report-card {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: 16px;
     padding: 24px;
     border: 1px solid var(--border);
     margin-top: 20px;
@@ -769,34 +684,42 @@ const css = `
   .ai-report-loading {
     text-align: center;
     padding: 40px;
-    color: var(--text-muted);
+    color: var(--muted);
   }
   .ai-report-loading .spinner {
     display: inline-block;
     width: 30px;
     height: 30px;
     border: 3px solid var(--border);
-    border-top: 3px solid var(--primary);
+    border-top: 3px solid var(--mint);
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-  .ai-thought {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: calc(14px * var(--text-scale));
-    padding: 8px 0;
-    animation: thoughtPulse 1.5s ease-in-out infinite;
+
+  .tx-explanation {
+    background: var(--bg);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 8px;
+    border-left: 3px solid var(--mint);
   }
-  @keyframes thoughtPulse {
-    0%, 100% { opacity: 0.6; }
-    50% { opacity: 1; }
+  .tx-explanation-text {
+    font-size: calc(14px * var(--text-scale));
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .tx-explanation-label {
+    font-size: calc(11px * var(--text-scale));
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
   }
 
-  /* ── HEALTH SCORE ── */
   .health-score-card {
     background: var(--surface);
-    border-radius: 8px;
+    border-radius: 16px;
     padding: 24px;
     border: 1px solid var(--border);
     margin-bottom: 24px;
@@ -820,7 +743,6 @@ const css = `
     font-size: calc(28px * var(--text-scale));
     color: white;
     flex-shrink: 0;
-    transition: transform 0.3s ease;
   }
   .health-score-circle .grade {
     font-size: calc(14px * var(--text-scale));
@@ -836,15 +758,11 @@ const css = `
   .health-metric {
     padding: 8px 12px;
     background: var(--bg);
-    border-radius: 4px;
-    cursor: help;
-    position: relative;
-    transition: background 0.2s ease;
+    border-radius: 8px;
   }
-  .health-metric:hover { background: var(--border); }
   .health-metric-label {
     font-size: calc(10px * var(--text-scale));
-    color: var(--text-muted);
+    color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
@@ -866,11 +784,6 @@ const css = `
     border-radius: 2px;
     transition: width 0.6s ease;
   }
-  .health-no-data {
-    text-align: center;
-    padding: 20px;
-    color: var(--text-muted);
-  }
 
   .risk-meter {
     display: flex;
@@ -878,7 +791,7 @@ const css = `
     gap: 12px;
     margin-top: 12px;
     padding: 12px 16px;
-    border-radius: 4px;
+    border-radius: 8px;
     background: var(--bg);
   }
   .risk-dot {
@@ -890,14 +803,13 @@ const css = `
   .risk-dot.green { background: var(--risk-green); }
   .risk-dot.yellow { background: var(--risk-yellow); }
   .risk-dot.red { background: var(--risk-red); }
-  .risk-dot.gray { background: var(--risk-gray); }
   .risk-label {
     font-weight: 600;
     font-size: calc(13px * var(--text-scale));
   }
   .risk-factors {
     font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
+    color: var(--muted);
   }
 
   .insight-cards {
@@ -909,336 +821,87 @@ const css = `
   .insight-mini-card {
     background: var(--bg);
     padding: 12px 16px;
-    border-radius: 4px;
-    border-left: 3px solid var(--primary);
+    border-radius: 8px;
+    border-left: 3px solid var(--mint);
   }
   .insight-mini-card .icon { font-size: calc(18px * var(--text-scale)); margin-right: 8px; }
   .insight-mini-card .text { font-size: calc(13px * var(--text-scale)); }
 
-  /* ── INCOME BANNER ── */
-  .income-banner {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 24px;
-  }
-  .income-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .income-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(16px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-  }
-  .btn-add-income {
-    padding: 8px 16px;
-    background: var(--primary);
-    color: var(--secondary);
-    border: none;
-    border-radius: 4px;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 600;
-    cursor: pointer;
-    min-height: 44px;
-    touch-action: manipulation;
-    transition: all 0.2s;
-  }
-  .btn-add-income:hover { background: var(--primary-hover); transform: scale(1.02); }
-  .income-total {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(28px * var(--text-scale));
-    font-weight: 800;
-    color: var(--primary);
-    margin-bottom: 12px;
-  }
+  .income-banner { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
+  .income-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+  .income-title { font-family: 'Syne', sans-serif; font-size: calc(16px * var(--text-scale)); font-weight: 700; color: var(--text); }
+  .btn-add-income { padding: 8px 16px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; }
+  .income-total { font-family: 'Syne', sans-serif; font-size: calc(28px * var(--text-scale)); font-weight: 800; color: var(--mint); margin-bottom: 12px; }
   .income-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-  .income-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: calc(13px * var(--text-scale));
-  }
-  .income-type-badge {
-    background: var(--primary)20;
-    color: var(--primary);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: calc(11px * var(--text-scale));
-    font-weight: 600;
-  }
-  .income-amount { font-weight: 600; color: var(--primary); }
-  .income-delete {
-    background: none;
-    border: none;
-    color: var(--error);
-    cursor: pointer;
-    font-size: calc(14px * var(--text-scale));
-    padding: 4px;
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
+  .income-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: calc(13px * var(--text-scale)); }
+  .income-type-badge { background: var(--mint)20; color: var(--mint); padding: 2px 8px; border-radius: 20px; font-size: calc(11px * var(--text-scale)); font-weight: 600; }
+  .income-amount { font-weight: 600; color: var(--mint); }
+  .income-delete { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(14px * var(--text-scale)); padding: 0 4px; }
   .credited-section { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-  .credited-toggle {
-    background: none;
-    border: none;
-    color: var(--primary);
-    font-size: calc(12px * var(--text-scale));
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
+  .credited-toggle { background: none; border: none; color: var(--mint); font-size: calc(12px * var(--text-scale)); cursor: pointer; display: flex; align-items: center; gap: 4px; }
 
-  /* ── STATS GRID ── */
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    margin-bottom: 28px;
-  }
-  .stat-card {
-    background: var(--surface);
-    border-radius: 8px;
-    padding: 24px;
-    border: 1px solid var(--border);
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s;
-  }
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+  .stat-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); position: relative; overflow: hidden; transition: transform 0.2s; }
   .stat-card:hover { transform: translateY(-2px); }
-  .stat-card::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-  }
-  .stat-card.spent::after { background: var(--error); }
-  .stat-card.free::after { background: var(--primary); }
-  .stat-card.savings::after { background: var(--warning); }
-  .stat-label {
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 500;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 10px;
-  }
-  .stat-label small {
-    font-size: calc(10px * var(--text-scale));
-    text-transform: none;
-    font-weight: normal;
-    color: var(--text-muted);
-  }
-  .stat-value {
-    font-family: 'Syne', sans-serif;
-    font-size: clamp(22px, 3vw, 32px);
-    font-weight: 700;
-    color: var(--text);
-  }
-  .stat-sub {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-    margin-top: 6px;
-  }
+  .stat-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .stat-card.spent::after { background: var(--danger); }
+  .stat-card.free::after { background: var(--mint); }
+  .stat-card.savings::after { background: #F6C90E; }
+  .stat-label { font-size: calc(12px * var(--text-scale)); font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .stat-label small { font-size: calc(10px * var(--text-scale)); text-transform: none; font-weight: normal; color: var(--muted); }
+  .stat-value { font-family: 'Syne', sans-serif; font-size: calc(26px * var(--text-scale)); font-weight: 700; color: var(--stat-value); }
+  .stat-sub { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 6px; }
 
-  /* ── SAVINGS RATE PULSE (Micro-interaction) ── */
-  @keyframes pulseGold {
-    0%, 100% { color: var(--text); }
-    50% { color: var(--warning); transform: scale(1.05); }
-  }
-  .stat-value.pulse { animation: pulseGold 0.8s ease; }
+  .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
+  .card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
+  .card-title { font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 
-  /* ── DASHBOARD GRID ── */
-  .dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 28px;
-  }
-  .card {
-    background: var(--surface);
-    border-radius: 8px;
-    padding: 24px;
-    border: 1px solid var(--border);
-  }
-  .card-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(15px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  /* ── BUDGET BAR ── */
   .budget-item { margin-bottom: 16px; }
-  .budget-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 6px;
-    font-size: calc(13px * var(--text-scale));
-  }
+  .budget-header { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: calc(13px * var(--text-scale)); }
   .budget-name { font-weight: 500; color: var(--text); }
-  .budget-amount { color: var(--text-muted); }
-  .budget-bar {
-    height: 6px;
-    background: var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-    transition: height 0.3s ease;
-  }
-  .budget-bar.near-limit { height: 8px; }
-  .budget-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.6s ease, background 0.3s ease;
-  }
-  .budget-fill.green { background: var(--primary); }
-  .budget-fill.yellow { background: var(--warning); }
-  .budget-fill.red { background: var(--error); }
-  .budget-warning {
-    margin-top: 4px;
-    font-size: calc(11px * var(--text-scale));
-    color: var(--error);
-  }
+  .budget-amount { color: var(--muted); }
+  .budget-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .budget-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .budget-warning { margin-top: 4px; font-size: calc(11px * var(--text-scale)); color: var(--danger); }
 
-  /* ── DONUT CHART ── */
   .donut-wrap { display: flex; align-items: center; gap: 24px; }
   .donut-svg { flex-shrink: 0; }
   .donut-legend { display: flex; flex-direction: column; gap: 10px; flex: 1; }
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: calc(13px * var(--text-scale));
-  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: calc(13px * var(--text-scale)); }
   .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .legend-name { color: var(--text-muted); flex: 1; }
-  .legend-val {
-    font-weight: 600;
-    color: var(--text);
-    font-size: calc(12px * var(--text-scale));
-  }
+  .legend-name { color: var(--muted); flex: 1; }
+  .legend-val { font-weight: 600; color: var(--text); font-size: calc(12px * var(--text-scale)); }
 
-  /* ── BAR CHART ── */
-  .bar-chart {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    height: 120px;
-    padding-bottom: 24px;
-  }
-  .bar-wrap {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    height: 100%;
-    justify-content: flex-end;
-  }
-  .bar {
-    width: 100%;
-    border-radius: 4px 4px 0 0;
-    background: var(--primary);
-    opacity: 0.3;
-    min-height: 4px;
-  }
+  .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-bottom: 24px; }
+  .bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bar { width: 100%; border-radius: 6px 6px 0 0; background: var(--mint); opacity: 0.3; min-height: 4px; }
   .bar.active { opacity: 1; }
-  .bar-label {
-    font-size: calc(11px * var(--text-scale));
-    color: var(--text-muted);
-  }
+  .bar-label { font-size: calc(11px * var(--text-scale)); color: var(--muted); }
 
-  /* ── STAGGERED BUDGET BARS (Micro-interaction) ── */
-  .budget-fill.animate {
-    animation: barGrow 0.5s ease forwards;
-    opacity: 0;
-  }
-  @keyframes barGrow {
-    0% { width: 0 !important; opacity: 0; }
-    100% { width: var(--bar-width); opacity: 1; }
-  }
+  .timing-bar-chart { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; }
+  .timing-bar-row { display: flex; align-items: center; gap: 12px; }
+  .timing-bar-label { width: 80px; font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .timing-bar-bg { flex: 1; height: 24px; background: var(--border); border-radius: 12px; overflow: hidden; }
+  .timing-bar-fill { height: 100%; background: var(--mint); border-radius: 12px; transition: width 0.3s; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; color: var(--navy-deep); font-size: calc(10px * var(--text-scale)); font-weight: 600; }
 
-  /* ── TIMING INSIGHTS ── */
-  .timing-bar-chart {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin: 16px 0;
-  }
-  .timing-bar-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .timing-bar-label {
-    width: 80px;
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-  }
-  .timing-bar-bg {
-    flex: 1;
-    height: 24px;
-    background: var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .timing-bar-fill {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 4px;
-    transition: width 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding-right: 8px;
-    color: var(--secondary);
-    font-size: calc(10px * var(--text-scale));
-    font-weight: 600;
-  }
-
-  /* ── EMPTY STATE ── */
   .empty-state { text-align: center; padding: 40px 20px; }
-  .empty-icon { font-size: calc(48px * var(--text-scale)); margin-bottom: 12px; opacity: 0.5; }
-  .empty-text {
-    color: var(--text-muted);
-    font-size: calc(18px * var(--text-scale));
-    font-weight: 600;
-  }
-  .empty-sub {
-    color: var(--text-muted);
-    font-size: calc(14px * var(--text-scale));
-    margin-top: 6px;
-    opacity: 0.7;
-    max-width: 400px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .empty-action {
-    margin-top: 20px;
-    display: inline-block;
-  }
+  .empty-icon { font-size: calc(40px * var(--text-scale)); margin-bottom: 12px; opacity: 0.5; }
+  .empty-text { color: var(--muted); font-size: calc(14px * var(--text-scale)); }
+  .empty-sub { color: var(--muted); font-size: calc(12px * var(--text-scale)); margin-top: 6px; opacity: 0.7; }
 
-  /* ── TRANSACTIONS ── */
+  .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 16px; }
+  .calendar-day-header { text-align: center; font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); padding: 8px; }
+  .calendar-day { min-height: 80px; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: var(--bg); }
+  .calendar-day-num { font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .calendar-tx { font-size: calc(10px * var(--text-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 4px; border-radius: 4px; margin-bottom: 2px; cursor: pointer; }
+  .calendar-tx.debit { background: var(--danger)20; color: var(--danger); }
+  .calendar-tx.credit { background: var(--mint)20; color: var(--mint); }
+
+  .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: calc(12px * var(--text-scale)); font-weight: 500; cursor: pointer; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+  .filter-chip.active { background: var(--mint); border-color: var(--mint); color: var(--navy-deep); }
+
+  /* Transaction checkbox fixes */
   .tx-checkbox {
     display: flex;
     align-items: center;
@@ -1250,7 +913,7 @@ const css = `
     width: 18px;
     height: 18px;
     cursor: pointer;
-    accent-color: var(--primary);
+    accent-color: var(--mint);
     background: var(--bg);
     border: 2px solid var(--border);
     border-radius: 4px;
@@ -1259,971 +922,162 @@ const css = `
     -moz-appearance: checkbox;
   }
   .tx-checkbox input[type="checkbox"]:checked {
-    accent-color: var(--primary);
-    background: var(--primary);
+    accent-color: var(--mint);
+    background: var(--mint);
   }
 
   .tx-list { display: flex; flex-direction: column; }
-  .tx-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 0;
-    border-bottom: 1px solid var(--border);
-    position: relative;
-  }
-  .tx-item:hover { background: var(--bg); margin: 0 -12px; padding: 14px 12px; border-radius: 4px; }
+  .tx-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); position: relative; }
   .tx-content { flex: 1; min-width: 0; }
   .tx-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .tx-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(16px * var(--text-scale));
-    flex-shrink: 0;
-  }
+  .tx-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: calc(16px * var(--text-scale)); flex-shrink: 0; }
   .tx-info { flex: 1; min-width: 0; }
-  .tx-name {
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 500;
-    color: var(--text);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+  .tx-name { font-size: calc(14px * var(--text-scale)); font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .tx-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tx-notes-icon { font-size: calc(12px * var(--text-scale)); color: var(--primary); cursor: help; }
-  .tx-date {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .tx-amount {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .tx-amount.debit { color: var(--error); }
-  .tx-amount.credit { color: var(--primary); }
-  .cat-badge {
-    font-size: calc(11px * var(--text-scale));
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-weight: 500;
-    white-space: nowrap;
-  }
+  .tx-notes-icon { font-size: calc(12px * var(--text-scale)); color: var(--mint); cursor: help; }
+  .tx-date { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 2px; }
+  .tx-amount { font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; white-space: nowrap; }
+  .tx-amount.debit { color: var(--danger); }
+  .tx-amount.credit { color: var(--mint); }
+  .cat-badge { font-size: calc(11px * var(--text-scale)); padding: 3px 8px; border-radius: 20px; font-weight: 500; white-space: nowrap; }
   .tx-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-  .tx-tag {
-    background: var(--primary)20;
-    color: var(--primary);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: calc(10px * var(--text-scale));
-    font-weight: 500;
-  }
-  .split-badge {
-    background: var(--primary)20;
-    color: var(--primary);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: calc(9px * var(--text-scale));
-    font-weight: 600;
-    margin-left: 6px;
-  }
+  .tx-tag { background: var(--mint)20; color: var(--mint); padding: 2px 8px; border-radius: 12px; font-size: calc(10px * var(--text-scale)); font-weight: 500; }
+  .split-badge { background: var(--mint)20; color: var(--mint); padding: 2px 6px; border-radius: 4px; font-size: calc(9px * var(--text-scale)); font-weight: 600; margin-left: 6px; }
   .tx-menu { position: relative; flex-shrink: 0; }
-  .tx-menu-btn {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: calc(18px * var(--text-scale));
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
+  .tx-menu-btn { background: none; border: none; color: var(--muted); font-size: calc(18px * var(--text-scale)); cursor: pointer; padding: 4px 8px; border-radius: 6px; }
   .tx-menu-btn:hover { background: var(--border); color: var(--text); }
-  .tx-dropdown {
-    position: absolute;
-    right: 0;
-    top: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 99;
-    min-width: 140px;
-  }
-  .tx-dropdown button {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 8px 12px;
-    background: none;
-    border: none;
-    font-size: calc(13px * var(--text-scale));
-    color: var(--text);
-    cursor: pointer;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
+  .tx-dropdown { position: absolute; right: 0; top: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10; min-width: 140px; }
+  .tx-dropdown button { display: block; width: 100%; text-align: left; padding: 8px 12px; background: none; border: none; font-size: calc(13px * var(--text-scale)); color: var(--text); cursor: pointer; }
   .tx-dropdown button:hover { background: var(--bg); }
-  .split-row {
-    margin-left: 50px;
-    padding: 8px 0 8px 12px;
-    border-left: 2px solid var(--primary);
-    margin-top: -4px;
-    margin-bottom: 4px;
-    background: var(--bg);
-    border-radius: 0 4px 4px 0;
-  }
-  .split-details {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+  .split-row { margin-left: 50px; padding: 8px 0 8px 12px; border-left: 2px solid var(--mint); margin-top: -4px; margin-bottom: 4px; background: var(--bg); border-radius: 0 8px 8px 0; }
+  .split-details { font-size: calc(12px * var(--text-scale)); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
 
-  /* ── FILTER CHIPS ── */
-  .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-  .filter-chip {
-    padding: 6px 18px;
-    border-radius: 4px;
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 500;
-    cursor: pointer;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--text);
-    min-height: 44px;
-    transition: all 0.2s;
-    touch-action: manipulation;
-  }
-  .filter-chip.active {
-    background: var(--primary);
-    border-color: var(--primary);
-    color: var(--secondary);
-  }
-
-  /* ── CALENDAR ── */
-  .calendar-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 4px;
-    margin-top: 16px;
-  }
-  .calendar-day-header {
-    text-align: center;
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 600;
-    color: var(--text-muted);
-    padding: 8px;
-  }
-  .calendar-day {
-    min-height: 80px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 4px;
-    background: var(--bg);
-  }
-  .calendar-day-num {
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 600;
-    color: var(--text-muted);
-    margin-bottom: 4px;
-  }
-  .calendar-tx {
-    font-size: calc(10px * var(--text-scale));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 2px 4px;
-    border-radius: 4px;
-    margin-bottom: 2px;
-    cursor: pointer;
-  }
-  .calendar-tx.debit { background: var(--error)20; color: var(--error); }
-  .calendar-tx.credit { background: var(--primary)20; color: var(--primary); }
-
-  /* ── BULK BAR ── */
-  .bulk-bar {
-    position: fixed;
-    bottom: 0;
-    left: 240px;
-    right: 0;
-    background: var(--secondary);
-    padding: 12px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    z-index: 400;
-    border-top: 1px solid var(--primary);
-    flex-wrap: wrap;
-    gap: 12px;
-  }
+  .bulk-bar { position: fixed; bottom: 0; left: 240px; right: 0; background: var(--navy-deep); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 400; border-top: 1px solid var(--mint); flex-wrap: wrap; gap: 12px; }
   .bulk-bar .selected-count { color: white; font-size: calc(14px * var(--text-scale)); }
   .bulk-bar .bulk-actions { display: flex; gap: 12px; }
-  .bulk-bar .bulk-actions button {
-    padding: 8px 16px;
-    border-radius: 4px;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .bulk-recategorise { background: var(--primary); color: var(--secondary); }
-  .bulk-delete { background: var(--error); color: white; }
-  .bulk-cancel {
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
+  .bulk-bar .bulk-actions button { padding: 8px 16px; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; border: none; }
+  .bulk-recategorise { background: var(--mint); color: var(--navy-deep); }
+  .bulk-delete { background: var(--danger); color: white; }
+  .bulk-cancel { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   @media (max-width: 768px) { .bulk-bar { left: 0; } }
 
-  /* ── UPLOAD ZONE ── */
-  .upload-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 60px 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s;
-    background: var(--surface);
-    margin-bottom: 24px;
-  }
-  .upload-zone:hover, .upload-zone.dragover { border-color: var(--primary); background: var(--primary)08; }
+  .upload-zone { border: 2px dashed var(--border); border-radius: 20px; padding: 60px 40px; text-align: center; cursor: pointer; transition: all 0.3s; background: var(--surface); margin-bottom: 24px; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: var(--mint); background: #00C89608; }
   .upload-icon { font-size: calc(48px * var(--text-scale)); margin-bottom: 16px; }
-  .upload-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(20px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 8px;
-  }
-  .upload-sub {
-    color: var(--text-muted);
-    font-size: calc(14px * var(--text-scale));
-    margin-bottom: 24px;
-  }
-  .btn-upload {
-    display: inline-block;
-    padding: 12px 28px;
-    background: var(--primary);
-    color: var(--secondary);
-    border: none;
-    border-radius: 4px;
-    font-family: 'Syne', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 700;
-    cursor: pointer;
-    min-height: 44px;
-    transition: all 0.2s;
-    touch-action: manipulation;
-  }
-  .btn-upload:hover { background: var(--primary-hover); transform: scale(1.02); }
+  .upload-title { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .upload-sub { color: var(--muted); font-size: calc(14px * var(--text-scale)); margin-bottom: 24px; }
+  .btn-upload { display: inline-block; padding: 12px 28px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; cursor: pointer; }
 
   .upload-history { margin-top: 16px; }
-  .history-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: calc(12px * var(--text-scale));
-  }
+  .history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: calc(12px * var(--text-scale)); }
 
-  /* ── GOALS ── */
-  .goals-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 16px;
-  }
-  .goal-card {
-    background: var(--surface);
-    border-radius: 8px;
-    padding: 24px;
-    border: 1px solid var(--border);
-  }
-  .goal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-  .goal-name {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(15px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-  }
+  .goals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .goal-card { background: var(--surface); border-radius: 16px; padding: 24px; border: 1px solid var(--border); }
+  .goal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .goal-name { font-family: 'Syne', sans-serif; font-size: calc(15px * var(--text-scale)); font-weight: 700; color: var(--text); }
   .goal-emoji { font-size: calc(24px * var(--text-scale)); }
-  .goal-amounts {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    align-items: flex-end;
-  }
-  .goal-saved {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(18px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-  }
-  .goal-target {
-    font-size: calc(13px * var(--text-scale));
-    color: var(--text-muted);
-  }
-  .progress-bar {
-    height: 6px;
-    background: var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 10px;
-  }
-  .progress-pulse {
-    animation: progressPulse 0.8s ease;
-  }
-  @keyframes progressPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 1; box-shadow: 0 0 20px var(--primary); }
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 4px;
-    transition: width 0.6s ease;
-  }
-  .goal-meta {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-  }
-  .add-goal-card {
-    background: none;
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-    min-height: 160px;
-    width: 100%;
-  }
-  .add-goal-card:hover { border-color: var(--primary); background: var(--primary)08; }
-  .add-goal-icon { font-size: calc(28px * var(--text-scale)); color: var(--text-muted); }
-  .add-goal-text {
-    font-size: calc(14px * var(--text-scale));
-    color: var(--text-muted);
-    font-weight: 500;
-  }
+  .goal-amounts { display: flex; justify-content: space-between; margin-bottom: 10px; align-items: flex-end; }
+  .goal-saved { font-family: 'Syne', sans-serif; font-size: calc(18px * var(--text-scale)); font-weight: 700; color: var(--stat-value); }
+  .goal-target { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
+  .progress-fill { height: 100%; background: var(--mint); border-radius: 3px; transition: width 0.6s ease; }
+  .goal-meta { font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .add-goal-card { background: none; border: 2px dashed var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.2s; min-height: 160px; width: 100%; }
+  .add-goal-card:hover { border-color: var(--mint); background: #00C89608; }
+  .add-goal-icon { font-size: calc(28px * var(--text-scale)); color: var(--muted); }
+  .add-goal-text { font-size: calc(14px * var(--text-scale)); color: var(--muted); font-weight: 500; }
 
-  /* ── INSIGHTS ── */
-  .insight-card {
-    background: linear-gradient(135deg, var(--secondary) 0%, #0F0F1A 100%);
-    border-radius: 8px;
-    padding: 24px;
-    color: white;
-    margin-bottom: 20px;
-    border: 1px solid #ffffff10;
-    position: relative;
-    overflow: hidden;
-  }
-  .insight-card::before {
-    content: '💡';
-    position: absolute;
-    right: 24px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: calc(48px * var(--text-scale));
-    opacity: 0.15;
-  }
-  .insight-label {
-    font-size: calc(11px * var(--text-scale));
-    color: var(--primary);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 8px;
-  }
-  .insight-text {
-    font-size: calc(16px * var(--text-scale));
-    font-weight: 500;
-    line-height: 1.5;
-    max-width: 80%;
-    color: white;
-  }
+  .insight-card { background: linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; border: 1px solid #ffffff10; position: relative; overflow: hidden; }
+  .insight-card::before { content: '💡'; position: absolute; right: 24px; top: 50%; transform: translateY(-50%); font-size: calc(48px * var(--text-scale)); opacity: 0.15; }
+  .insight-label { font-size: calc(11px * var(--text-scale)); color: var(--mint); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .insight-text { font-size: calc(16px * var(--text-scale)); font-weight: 500; line-height: 1.5; max-width: 80%; color: white; }
 
-  /* ── WHAT-IF ── */
-  .whatif-scenario {
-    margin-bottom: 32px;
-    padding: 20px;
-    background: var(--bg);
-    border-radius: 8px;
-    border: 1px solid var(--border);
-  }
-  .whatif-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(16px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .whatif-input-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 16px;
-    align-items: flex-end;
-  }
+  .whatif-scenario { margin-bottom: 32px; padding: 20px; background: var(--bg); border-radius: 16px; border: 1px solid var(--border); }
+  .whatif-title { font-family: 'Syne', sans-serif; font-size: calc(16px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .whatif-input-group { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: flex-end; }
   .whatif-field { flex: 1; min-width: 120px; }
-  .whatif-field label {
-    display: block;
-    font-size: calc(11px * var(--text-scale));
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    margin-bottom: 4px;
-  }
-  .whatif-field input, .whatif-field select {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: calc(13px * var(--text-scale));
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .whatif-output {
-    margin-top: 16px;
-    padding: 16px;
-    background: var(--surface);
-    border-radius: 4px;
-    border-left: 3px solid var(--primary);
-  }
+  .whatif-field label { display: block; font-size: calc(11px * var(--text-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .whatif-field input, .whatif-field select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: calc(13px * var(--text-scale)); }
+  .whatif-output { margin-top: 16px; padding: 16px; background: var(--surface); border-radius: 12px; border-left: 3px solid var(--mint); }
   .whatif-output-text { font-size: calc(14px * var(--text-scale)); color: var(--text); }
-  .whatif-output-value {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(20px * var(--text-scale));
-    font-weight: 800;
-    color: var(--primary);
-  }
-  .custom-scenario-card {
-    background: var(--surface);
-    border-radius: 4px;
-    padding: 16px;
-    margin-bottom: 12px;
-    border: 1px solid var(--border);
-  }
-  .custom-scenario-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-  .custom-scenario-text {
-    font-size: calc(14px * var(--text-scale));
-    color: var(--text);
-  }
-  .custom-scenario-output {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(18px * var(--text-scale));
-    font-weight: 800;
-    color: var(--primary);
-    margin-top: 8px;
-  }
-  .delete-scenario {
-    background: none;
-    border: none;
-    color: var(--error);
-    cursor: pointer;
-    font-size: calc(16px * var(--text-scale));
-    padding: 4px;
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
+  .whatif-output-value { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 800; color: var(--mint); }
+  .custom-scenario-card { background: var(--surface); border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--border); }
+  .custom-scenario-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .custom-scenario-text { font-size: calc(14px * var(--text-scale)); color: var(--text); }
+  .custom-scenario-output { font-family: 'Syne', sans-serif; font-size: calc(18px * var(--text-scale)); font-weight: 800; color: var(--mint); margin-top: 8px; }
+  .delete-scenario { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); padding: 4px; }
 
-  /* ── SLIDER TOOLTIP (Micro-interaction) ── */
-  .slider-tooltip {
-    position: absolute;
-    top: -30px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--secondary);
-    color: white;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 600;
-    pointer-events: none;
-    white-space: nowrap;
-  }
-
-  /* ── SETTINGS ── */
   .settings-section { margin-bottom: 32px; }
-  .settings-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
-  }
-  .settings-card {
-    background: var(--surface);
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    overflow: hidden;
-  }
-  .settings-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    gap: 12px;
-    flex-wrap: wrap;
-  }
+  .settings-title { font-family: 'Syne', sans-serif; font-size: calc(13px * var(--text-scale)); font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  .settings-card { background: var(--surface); border-radius: 16px; border: 1px solid var(--border); overflow: hidden; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
   .settings-row:last-child { border-bottom: none; }
-  .settings-row-label {
-    font-size: calc(14px * var(--text-scale));
-    color: var(--text);
-    font-weight: 500;
-  }
-  .settings-row-sub {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .settings-select {
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(13px * var(--text-scale));
-    color: var(--text);
-    background: var(--bg);
-    outline: none;
-    cursor: pointer;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .btn-danger {
-    padding: 8px 16px;
-    background: var(--error);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 600;
-    cursor: pointer;
-    min-height: 44px;
-    transition: all 0.2s;
-    touch-action: manipulation;
-  }
+  .settings-row-label { font-size: calc(14px * var(--text-scale)); color: var(--text); font-weight: 500; }
+  .settings-row-sub { font-size: calc(12px * var(--text-scale)); color: var(--muted); margin-top: 2px; }
+  .settings-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-family: 'DM Sans', sans-serif; font-size: calc(13px * var(--text-scale)); color: var(--text); background: var(--bg); outline: none; cursor: pointer; }
+  .btn-danger { padding: 8px 16px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { opacity: 0.85; }
-  .btn-outline {
-    padding: 8px 16px;
-    background: none;
-    color: var(--primary);
-    border: 1px solid var(--primary);
-    border-radius: 4px;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 600;
-    cursor: pointer;
-    min-height: 44px;
-    transition: all 0.2s;
-    touch-action: manipulation;
-  }
-  .btn-outline:hover { background: var(--primary); color: var(--secondary); }
+  .btn-outline { padding: 8px 16px; background: none; color: var(--mint); border: 1px solid var(--mint); border-radius: 8px; font-size: calc(13px * var(--text-scale)); font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btn-outline:hover { background: var(--mint); color: var(--navy-deep); }
 
-  .theme-toggle {
-    display: flex;
-    align-items: center;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 3px;
-    gap: 2px;
-    cursor: pointer;
-  }
-  .theme-toggle-btn {
-    padding: 6px 14px;
-    border-radius: 4px;
-    border: none;
-    cursor: pointer;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 500;
-    transition: all 0.2s;
-    background: none;
-    color: var(--text-muted);
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .theme-toggle-btn.active { background: var(--primary); color: var(--secondary); font-weight: 700; }
+  .theme-toggle { display: flex; align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px; gap: 2px; cursor: pointer; }
+  .theme-toggle-btn { padding: 6px 14px; border-radius: 16px; border: none; cursor: pointer; font-size: calc(13px * var(--text-scale)); font-weight: 500; transition: all 0.2s; background: none; color: var(--muted); }
+  .theme-toggle-btn.active { background: var(--mint); color: var(--navy-deep); font-weight: 700; }
 
   .text-size-selector { display: flex; gap: 8px; }
-  .size-btn {
-    padding: 6px 12px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    cursor: pointer;
-    font-size: calc(13px * var(--text-scale));
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
-  .size-btn.active { background: var(--primary); color: var(--secondary); border-color: var(--primary); }
+  .size-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; font-size: calc(13px * var(--text-scale)); }
+  .size-btn.active { background: var(--mint); color: var(--navy-deep); border-color: var(--mint); }
 
-  /* ── MODAL ── */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: #00000070;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    z-index: 500;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .modal {
-    background: var(--surface);
-    border-radius: 8px;
-    padding: 32px;
-    width: 100%;
-    max-width: 500px;
-    box-shadow: 0 40px 80px #00000030;
-    max-height: 90vh;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-  }
-  .modal-title {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(20px * var(--text-scale));
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 24px;
-  }
-  .modal-input {
-    width: 100%;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    color: var(--text);
-    background: var(--bg);
-    outline: none;
-    transition: border-color 0.2s;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .modal-input:focus { border-color: var(--primary); }
-  .modal-label {
-    display: block;
-    font-size: calc(12px * var(--text-scale));
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-    margin-top: 16px;
-  }
-  .modal-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 24px;
-    justify-content: flex-end;
-  }
-  .btn-cancel {
-    padding: 12px 20px;
-    background: var(--bg);
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    cursor: pointer;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .btn-save {
-    padding: 12px 24px;
-    background: var(--primary);
-    color: var(--secondary);
-    border: none;
-    border-radius: 4px;
-    font-family: 'Syne', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 700;
-    cursor: pointer;
-    min-height: 44px;
-    transition: all 0.2s;
-    touch-action: manipulation;
-  }
-  .btn-save:hover { background: var(--primary-hover); }
+  .modal-overlay { position: fixed; inset: 0; background: #00000070; z-index: 500; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: var(--surface); border-radius: 20px; padding: 32px; width: 100%; max-width: 500px; box-shadow: 0 40px 80px #00000030; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border); }
+  .modal-title { font-family: 'Syne', sans-serif; font-size: calc(20px * var(--text-scale)); font-weight: 700; color: var(--text); margin-bottom: 24px; }
+  .modal-input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); color: var(--text); background: var(--bg); outline: none; transition: border-color 0.2s; }
+  .modal-input:focus { border-color: var(--mint); }
+  .modal-label { display: block; font-size: calc(12px * var(--text-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; margin-top: 16px; }
+  .modal-actions { display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end; }
+  .btn-cancel { padding: 12px 20px; background: var(--bg); color: var(--muted); border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); cursor: pointer; }
+  .btn-save { padding: 12px 24px; background: var(--mint); color: var(--navy-deep); border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; cursor: pointer; }
+  .btn-save:hover { background: #00e0aa; }
 
-  .category-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-  .category-pill {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: var(--text);
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .category-pill.active {
-    border-color: var(--primary);
-    background: var(--primary)20;
-  }
+  .category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .category-pill { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 30px; font-size: calc(13px * var(--text-scale)); font-weight: 500; cursor: pointer; transition: all 0.2s; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+  .category-pill.active { border-color: var(--mint); background: var(--mint)20; }
   .category-pill:hover { transform: scale(0.98); }
 
-  .tags-input {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 8px;
-    background: var(--bg);
-  }
-  .tag-chip {
-    background: var(--primary)20;
-    color: var(--primary);
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: calc(12px * var(--text-scale));
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .tag-chip button {
-    background: none;
-    border: none;
-    color: var(--primary);
-    cursor: pointer;
-    font-size: calc(12px * var(--text-scale));
-    padding: 0 2px;
-  }
-  .tags-input-field {
-    border: none;
-    background: none;
-    padding: 4px;
-    flex: 1;
-    min-width: 80px;
-    outline: none;
-    color: var(--text);
-    font-size: calc(13px * var(--text-scale));
-  }
+  .tags-input { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: var(--bg); }
+  .tag-chip { background: var(--mint)20; color: var(--mint); padding: 4px 8px; border-radius: 16px; font-size: calc(12px * var(--text-scale)); display: inline-flex; align-items: center; gap: 6px; }
+  .tag-chip button { background: none; border: none; color: var(--mint); cursor: pointer; font-size: calc(12px * var(--text-scale)); padding: 0 2px; }
+  .tags-input-field { border: none; background: none; padding: 4px; flex: 1; min-width: 80px; outline: none; color: var(--text); font-size: calc(13px * var(--text-scale)); }
 
-  .split-line {
-    background: var(--bg);
-    border-radius: 4px;
-    padding: 12px;
-    margin-bottom: 12px;
-    border: 1px solid var(--border);
-  }
-  .split-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-  .split-title {
-    font-size: calc(13px * var(--text-scale));
-    font-weight: 600;
-    color: var(--text-muted);
-  }
-  .split-remove {
-    background: none;
-    border: none;
-    color: var(--error);
-    cursor: pointer;
-    font-size: calc(16px * var(--text-scale));
-    min-height: 44px;
-    min-width: 44px;
-    touch-action: manipulation;
-  }
-  .split-fields {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
-  }
-  .split-fields input, .split-fields select {
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: calc(13px * var(--text-scale));
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .split-total {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    font-size: calc(14px * var(--text-scale));
-  }
-  .split-remainder { color: var(--primary); font-weight: 600; }
+  .split-line { background: var(--bg); border-radius: 12px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); }
+  .split-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .split-title { font-size: calc(13px * var(--text-scale)); font-weight: 600; color: var(--muted); }
+  .split-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: calc(16px * var(--text-scale)); }
+  .split-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .split-fields input, .split-fields select { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: calc(13px * var(--text-scale)); }
+  .split-total { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: calc(14px * var(--text-scale)); }
+  .split-remainder { color: var(--mint); font-weight: 600; }
 
-  .search-wrap {
-    position: relative;
-    margin-bottom: 20px;
-  }
-  .search-bar {
-    width: 100%;
-    padding: 12px 16px 12px 40px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    background: var(--surface);
-    outline: none;
-    color: var(--text);
-    transition: border-color 0.2s;
-    min-height: 44px;
-    touch-action: manipulation;
-  }
-  .search-bar:focus { border-color: var(--primary); }
-  .search-icon {
-    position: absolute;
-    left: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    font-size: calc(14px * var(--text-scale));
-    pointer-events: none;
-  }
+  .search-wrap { position: relative; margin-bottom: 20px; }
+  .search-bar { width: 100%; padding: 12px 16px 12px 40px; border: 1px solid var(--border); border-radius: 10px; font-family: 'DM Sans', sans-serif; font-size: calc(14px * var(--text-scale)); background: var(--surface); outline: none; color: var(--text); transition: border-color 0.2s; }
+  .search-bar:focus { border-color: var(--mint); }
+  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: calc(14px * var(--text-scale)); pointer-events: none; }
 
-  .sub-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border);
-  }
+  .sub-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .sub-item:last-child { border-bottom: none; }
-  .sub-name {
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 500;
-    color: var(--text);
-  }
-  .sub-freq {
-    font-size: calc(12px * var(--text-scale));
-    color: var(--text-muted);
-  }
-  .sub-amount {
-    font-family: 'Syne', sans-serif;
-    font-size: calc(14px * var(--text-scale));
-    font-weight: 700;
-    color: var(--primary);
-  }
+  .sub-name { font-size: calc(14px * var(--text-scale)); font-weight: 500; color: var(--text); }
+  .sub-freq { font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  .sub-amount { font-family: 'Syne', sans-serif; font-size: calc(14px * var(--text-scale)); font-weight: 700; color: var(--danger); }
 
-  .contact-links {
-    display: flex;
-    gap: 16px;
-    justify-content: center;
-    margin-top: 20px;
-  }
-  .contact-card {
-    background: var(--bg);
-    border-radius: 8px;
-    padding: 20px;
-    text-align: center;
-    flex: 1;
-    border: 1px solid var(--border);
-  }
+  .contact-links { display: flex; gap: 16px; justify-content: center; margin-top: 20px; }
+  .contact-card { background: var(--bg); border-radius: 12px; padding: 20px; text-align: center; flex: 1; border: 1px solid var(--border); }
   .contact-icon { font-size: calc(40px * var(--text-scale)); margin-bottom: 12px; }
   .contact-title { font-weight: 700; margin-bottom: 8px; }
-  .whatsapp-link {
-    display: inline-block;
-    margin-top: 12px;
-    padding: 8px 20px;
-    background: #25D366;
-    color: white;
-    border-radius: 30px;
-    text-decoration: none;
-    font-weight: 600;
-    min-height: 44px;
-  }
+  .whatsapp-link { display: inline-block; margin-top: 12px; padding: 8px 20px; background: #25D366; color: white; border-radius: 30px; text-decoration: none; font-weight: 600; }
 
-  .tx-explanation {
-    background: var(--bg);
-    border-radius: 4px;
-    padding: 16px;
-    margin-top: 8px;
-    border-left: 3px solid var(--primary);
-  }
-  .tx-explanation-text {
-    font-size: calc(14px * var(--text-scale));
-    color: var(--text);
-    line-height: 1.5;
-  }
-  .tx-explanation-label {
-    font-size: calc(11px * var(--text-scale));
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-  }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--navy-deep); color: white; padding: 14px 20px; border-radius: 12px; font-size: calc(14px * var(--text-scale)); border-left: 3px solid var(--mint); box-shadow: 0 8px 24px #00000030; z-index: 999; animation: slideUp 0.3s ease; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
-  .toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    background: var(--secondary);
-    color: white;
-    padding: 14px 20px;
-    border-radius: 4px;
-    font-size: calc(14px * var(--text-scale));
-    border-left: 3px solid var(--primary);
-    box-shadow: 0 8px 24px #00000030;
-    z-index: 999;
-    animation: slideUp 0.3s ease;
-  }
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ── RESPONSIVE ── */
   @media (max-width: 768px) {
     .sidebar { transform: translateX(-100%); z-index: 300; pointer-events: none; }
     .sidebar.open { transform: translateX(0); pointer-events: all; }
@@ -2231,21 +1085,14 @@ const css = `
     .mobile-overlay.open { display: block; pointer-events: all; }
     .mobile-header { display: flex !important; z-index: 200; }
     .app { display: block !important; }
-    .main {
-      margin-left: 0 !important;
-      padding: 80px 16px 32px !important;
-      width: 100vw !important;
-      position: relative !important;
-      z-index: 1 !important;
-      pointer-events: all !important;
-    }
+    .main { margin-left: 0 !important; padding: 80px 16px 32px !important; width: 100vw !important; position: relative !important; z-index: 1 !important; pointer-events: all !important; }
     .stats-grid { grid-template-columns: 1fr !important; gap: 12px; }
     .dashboard-grid { grid-template-columns: 1fr !important; }
     .goals-grid { grid-template-columns: 1fr !important; }
     .auth-card { padding: 32px 24px; }
     .donut-wrap { flex-direction: column; }
-    .greeting { font-size: clamp(24px, 5vw, 32px) !important; }
-    .stat-value { font-size: clamp(20px, 4vw, 28px) !important; }
+    .greeting { font-size: calc(22px * var(--text-scale)) !important; }
+    .stat-value { font-size: calc(22px * var(--text-scale)) !important; }
     .income-banner { flex-direction: column; align-items: flex-start; gap: 10px; }
     .settings-row { flex-wrap: wrap; }
     .split-fields { grid-template-columns: 1fr; }
@@ -2255,23 +1102,16 @@ const css = `
     .contact-links { flex-direction: column; }
     .health-score-main { flex-direction: column; text-align: center; }
     .health-score-details { grid-template-columns: 1fr 1fr; }
-    .health-score-circle { width: 80px; height: 80px; font-size: calc(22px * var(--text-scale)); }
-    .insight-text { max-width: 100%; }
-    .insight-card::before { font-size: calc(32px * var(--text-scale)); right: 16px; }
   }
 `;
 
-// ─── COMPONENTS ──────────────────────────────────────────────────────────────
-
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
-
 function DonutChart({ data, currency }) {
   if (!data || data.length === 0) {
     return (
       <div className="empty-state">
         <div className="empty-icon">📊</div>
-        <div className="empty-text">No spending data yet</div>
-        <div className="empty-sub">Upload your first statement to see where your money goes</div>
+        <div className="empty-text">Upload your first statement to get started</div>
       </div>
     );
   }
@@ -2289,16 +1129,16 @@ function DonutChart({ data, currency }) {
   return (
     <div className="donut-wrap">
       <svg width={size} height={size} className="donut-svg">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="14" />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#E2E8F0" strokeWidth="14" />
         {segments.map((s, i) => (
           <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color}
             strokeWidth="14"
             strokeDasharray={`${s.dash} ${s.gap}`}
             strokeDashoffset={-s.offset + circumference * 0.25} />
         ))}
-        <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--primary)"
+        <text x={cx} y={cy - 6} textAnchor="middle" fill="#00C896"
           style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 11 }}>Total</text>
-        <text x={cx} y={cy + 8} textAnchor="middle" fill="var(--primary)"
+        <text x={cx} y={cy + 8} textAnchor="middle" fill="#00C896"
           style={{ fontFamily: "Syne", fontWeight: 800, fontSize: 10 }}>
           {c.symbol}{(total * EXCHANGE_RATES[currency] / EXCHANGE_RATES[currency]).toLocaleString("en-BW", { maximumFractionDigits: 0 })}
         </text>
@@ -2321,8 +1161,7 @@ function BarChart({ data }) {
     return (
       <div className="empty-state">
         <div className="empty-icon">📈</div>
-        <div className="empty-text">No monthly data yet</div>
-        <div className="empty-sub">Upload statements from different months to see trends</div>
+        <div className="empty-text">Upload your first statement to get started</div>
       </div>
     );
   }
@@ -2341,8 +1180,7 @@ function BarChart({ data }) {
   );
 }
 
-// ─── AI ADVISOR ──────────────────────────────────────────────────────────────
-
+// ─── AI ADVISOR COMPONENT ──────────────────────────────────────────────────
 function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [loading, setLoading] = useState(false);
   const [advice, setAdvice] = useState(null);
@@ -2350,23 +1188,6 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   const [reportLoading, setReportLoading] = useState(false);
   const [report, setReport] = useState(null);
   const [aiStatus, setAiStatus] = useState("idle");
-  const [thoughtIndex, setThoughtIndex] = useState(0);
-
-  const thoughtMessages = [
-    "Looking at your spending patterns...",
-    "Checking your savings rate...",
-    "Comparing this month to last...",
-    "Finding opportunities for you..."
-  ];
-
-  useEffect(() => {
-    if (loading) {
-      const interval = setInterval(() => {
-        setThoughtIndex((prev) => (prev + 1) % thoughtMessages.length);
-      }, 500);
-      return () => clearInterval(interval);
-    }
-  }, [loading]);
 
   const now = new Date();
   const currentMonth = now.getMonth();
@@ -2401,19 +1222,20 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   }).map(b => b.category);
   
   const generateAdvice = async () => {
-    if (transactions.length === 0) {
-      setAiStatus("offline");
-      setAdvice({
-        summary: "No transactions to analyze yet.",
-        opportunity: "Upload a bank statement or add transactions manually.",
-        encouragement: "Start tracking your finances today!"
-      });
-      return;
-    }
-    
     setLoading(true);
-    setAiStatus("thinking");
+    setAiStatus("loading");
     try {
+      const data = {
+        totalIncome,
+        totalSpent,
+        savingsRate,
+        topCategory: topCat ? topCat[0] : "None",
+        topAmount: topCat ? topCat[1] : 0,
+        overBudget,
+        currency,
+        transactionCount: monthTxs.length
+      };
+      
       const prompt = `You are a financial advisor for SpendSight users. 
 Analyze this user's spending data and provide personalized advice.
 
@@ -2422,37 +1244,56 @@ User financial data:
 - Total spent: ${formatMoney(totalSpent, currency)}
 - Savings rate: ${savingsRate.toFixed(1)}%
 - Top spending category: ${topCat ? topCat[0] : "None"} (${formatMoney(topCat ? topCat[1] : 0, currency)})
-- Categories over budget: ${overBudget.length > 0 ? overBudget.join(", ") : "None"}`;
+- Categories over budget: ${overBudget.length > 0 ? overBudget.join(", ") : "None"}
 
-      // SECURITY FIX: No external API calls — mock service only
-      const result = await callAIService(prompt);
+Return a JSON object with exactly these keys:
+{
+  "summary": "A one-sentence summary of their spending this month",
+  "opportunity": "One specific savings opportunity with a suggested amount",
+  "encouragement": "A brief encouraging message"
+}`;
+
+      const result = await callNVIDIA(prompt);
+
+      if (result.error) {
+        setAiStatus("error");
+        setAdvice({ summary: result.message, opportunity: "", encouragement: "" });
+        setLoading(false);
+        return;
+      }
+
+      let parsedResult = result;
+      if (result.raw) {
+        try {
+          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error("AI response was not valid JSON");
+          }
+        } catch (e) {
+          setAiStatus("error");
+          setAdvice({ summary: "AI returned an unreadable response. Please try again.", opportunity: "", encouragement: "" });
+          setLoading(false);
+          return;
+        }
+      }
       
-      setAdvice(result);
-      setAiStatus("live");
+      setAdvice(parsedResult);
+      setAiStatus("success");
     } catch (error) {
       console.error('AI advisor error:', error);
       setAiStatus("error");
       setAdvice({
-        summary: "Unable to connect to AI service. Using offline mode.",
-        opportunity: "Review your top spending categories for potential savings.",
-        encouragement: "Your financial journey continues regardless!"
+        summary: "We're having trouble generating advice right now. Please try again later.",
+        opportunity: "",
+        encouragement: ""
       });
     }
     setLoading(false);
   };
   
   const generateReport = async () => {
-    if (transactions.length === 0) {
-      setReport({
-        topCategory: "No data",
-        trend: "unknown",
-        assessment: "Add transactions to generate a report.",
-        recommendations: ["Upload your first bank statement."]
-      });
-      setShowReport(true);
-      return;
-    }
-    
     setReportLoading(true);
     setShowReport(true);
     try {
@@ -2466,11 +1307,41 @@ User financial data:
       const prompt = `Generate a weekly spending report for a user with:
 - Top spending category: ${topCat ? topCat[0] : "None"}
 - Spending trend: ${totalSpent > prevMonthSpent ? "up" : "down"} (${totalSpent > prevMonthSpent ? "increasing" : "decreasing"})
-- Current savings rate: ${savingsRate.toFixed(1)}%`;
+- Current savings rate: ${savingsRate.toFixed(1)}%
+
+Return a JSON object with:
+{
+  "topCategory": "The user's top spending category",
+  "trend": "up" or "down",
+  "assessment": "A brief assessment of their spending health",
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}`;
+
+      const result = await callNVIDIA(prompt);
+
+      if (result.error) {
+        setReport({ topCategory: "—", trend: "unknown", assessment: result.message, recommendations: [] });
+        setReportLoading(false);
+        return;
+      }
+
+      let parsedResult = result;
+      if (result.raw) {
+        try {
+          const jsonMatch = result.raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error("AI response was not valid JSON");
+          }
+        } catch (e) {
+          setReport({ topCategory: "—", trend: "unknown", assessment: "AI returned an unreadable response. Please try again.", recommendations: [] });
+          setReportLoading(false);
+          return;
+        }
+      }
       
-      const result = await callAIService(prompt);
-      
-      setReport(result);
+      setReport(parsedResult);
     } catch (error) {
       console.error('AI report error:', error);
       setReport({
@@ -2484,7 +1355,9 @@ User financial data:
   };
   
   useEffect(() => {
-    generateAdvice();
+    if (transactions.length > 0) {
+      generateAdvice();
+    }
   }, [transactions.length]);
   
   if (transactions.length === 0) {
@@ -2492,28 +1365,28 @@ User financial data:
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
-          <span className="ai-advisor-status offline">⏸ No Data</span>
         </div>
         <div className="ai-advisor-summary">Upload transactions to get personalized financial advice.</div>
-        <div style={{ fontSize: 14, color: "var(--text-muted)" }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
+        <div style={{ fontSize: 14, color: "var(--muted)" }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
       </div>
     );
   }
-  
-  const statusClass = aiStatus === "live" ? "live" : 
-                      aiStatus === "thinking" ? "thinking" : 
-                      aiStatus === "error" || aiStatus === "offline" ? "error" : "ready";
   
   return (
     <div>
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
-          <span className={`ai-advisor-status ${statusClass}`}>
-            {aiStatus === "thinking" ? "⏳ Thinking" : 
-             aiStatus === "live" ? "✓ Live" : 
-             aiStatus === "error" ? "✗ Offline" : 
-             aiStatus === "offline" ? "⏸ No Data" : "Ready"}
+          <span className="ai-advisor-badge" style={{ 
+            background: aiStatus === "success" ? "var(--mint)" : 
+                       aiStatus === "loading" ? "#F6C90E" : 
+                       aiStatus === "error" ? "var(--danger)" : "var(--muted)",
+            color: aiStatus === "loading" ? "var(--navy-deep)" : "white"
+          }}>
+            {aiStatus === "idle" ? "Ready" : 
+             aiStatus === "loading" ? "⏳ Thinking" : 
+             aiStatus === "success" ? "✓ Live" : 
+             aiStatus === "error" ? "✗ Error" : "Ready"}
           </span>
           <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
             {loading ? "⏳" : "⟳ Refresh Advice"}
@@ -2521,11 +1394,9 @@ User financial data:
         </div>
         
         {loading ? (
-          <div>
-            <div className="ai-report-loading">
-              <div className="spinner" />
-            </div>
-            <div className="ai-thought">{thoughtMessages[thoughtIndex]}</div>
+          <div className="ai-report-loading">
+            <div className="spinner" />
+            <div style={{ marginTop: 12 }}>Analyzing your finances...</div>
           </div>
         ) : advice ? (
           <>
@@ -2571,52 +1442,57 @@ User financial data:
   );
 }
 
-// ─── FINANCIAL HEALTH ──────────────────────────────────────────────────────
-
+// ─── FINANCIAL HEALTH COMPONENT ─────────────────────────────────────────────
 function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
-  
-  if (!health.hasData) {
+
+  if (!health.hasData || health.score === null) {
     return (
       <div className="health-score-card">
-        <div className="health-no-data">
-          <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
-          <div className="empty-text">No financial data yet</div>
-          <div className="empty-sub">Upload transactions or add income to see your financial health score</div>
+        <div className="health-score-main">
+          <div className="health-score-circle" style={{ background: "var(--border)", color: "var(--muted)" }}>
+            —
+            <span className="grade">No grade yet</span>
+          </div>
+          <div className="health-score-details">
+            <div style={{ fontSize: 14, color: "var(--muted)" }}>
+              Add some transactions, income, a budget, or a savings goal to get your financial health score.
+            </div>
+          </div>
         </div>
       </div>
     );
   }
-  
-  const scoreColor = health.score >= 70 ? "var(--primary)" : health.score >= 40 ? "var(--warning)" : "var(--error)";
-  
+
+  const scoreColor = health.score >= 70 ? "var(--mint)" : health.score >= 40 ? "#F6C90E" : "var(--danger)";
+
   const getInsights = () => {
     const insights = [];
-    if (health.savingsRate >= 20) insights.push({ icon: "💰", text: `You saved ${health.savingsRate}% of income this month — Excellent!` });
+    if (health.savingsScore === null) insights.push({ icon: "💡", text: "Add income to track your savings rate" });
+    else if (health.savingsRate >= 20) insights.push({ icon: "💰", text: `You saved ${health.savingsRate}% of income this month — Excellent!` });
     else if (health.savingsRate >= 10) insights.push({ icon: "💪", text: `Savings rate of ${health.savingsRate}% — Keep going!` });
-    else if (health.savingsRate > 0) insights.push({ icon: "📈", text: `Try to save at least 10% of income (currently ${health.savingsRate}%)` });
-    
-    if (health.budgetScore >= 90 && health.budgetScore > 0) insights.push({ icon: "✅", text: "All categories within budget — Great discipline!" });
-    else if (health.budgetScore >= 70 && health.budgetScore > 0) insights.push({ icon: "⚠️", text: "Some categories over budget — Review spending" });
-    else if (health.budgetScore > 0) insights.push({ icon: "🔴", text: "Multiple categories over budget — Consider adjustments" });
-    
-    if (health.stabilityScore >= 80 && health.stabilityScore > 0) insights.push({ icon: "📊", text: "Spending stable — no major fluctuations" });
-    else if (health.stabilityScore >= 50 && health.stabilityScore > 0) insights.push({ icon: "📉", text: "Spending fluctuating — review irregular expenses" });
-    else if (health.stabilityScore > 0) insights.push({ icon: "📊", text: "Significant spending changes — investigate" });
-    
+    else insights.push({ icon: "📈", text: `Try to save at least 10% of income (currently ${health.savingsRate}%)` });
+
+    if (health.budgetScore === null) insights.push({ icon: "💡", text: "Set a budget to track category spending" });
+    else if (health.budgetScore >= 90) insights.push({ icon: "✅", text: "All categories within budget — Great discipline!" });
+    else if (health.budgetScore >= 70) insights.push({ icon: "⚠️", text: "Some categories over budget — Review spending" });
+    else insights.push({ icon: "🔴", text: "Multiple categories over budget — Consider adjustments" });
+
+    if (health.stabilityScore === null) insights.push({ icon: "💡", text: "Track 2 months of spending to see stability trends" });
+    else if (health.stabilityScore >= 80) insights.push({ icon: "📊", text: "Spending stable — no major fluctuations" });
+    else if (health.stabilityScore >= 50) insights.push({ icon: "📉", text: "Spending fluctuating — review irregular expenses" });
+    else insights.push({ icon: "📊", text: "Significant spending changes — investigate" });
+
     if (goals.length > 0) {
       const onTrack = goals.filter(g => (g.saved / g.target) * 100 >= 50).length;
       insights.push({ icon: "🎯", text: `${onTrack}/${goals.length} goals on track` });
     }
-    
+
     return insights.slice(0, 4);
   };
-  
+
   const insights = getInsights();
-  
-  // Check if savings rate hit 20% for pulse animation
-  const shouldPulse = health.savingsRate >= 20;
-  
+
   return (
     <div className="health-score-card">
       <div className="health-score-main">
@@ -2625,27 +1501,25 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
           <span className="grade">Grade {health.grade}</span>
         </div>
         <div className="health-score-details">
-          <div className="health-metric" title="Percentage of income saved this month">
+          <div className="health-metric">
             <div className="health-metric-label">Savings Rate</div>
-            <div className="health-metric-value" style={shouldPulse ? { animation: 'pulseGold 0.8s ease' } : {}}>
-              {health.savingsRate}%
-            </div>
-            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.savingsScore}%`, background: "var(--primary)" }} /></div>
+            <div className="health-metric-value">{health.savingsScore === null ? "—" : `${health.savingsRate}%`}</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.savingsScore ?? 0}%`, background: "var(--mint)" }} /></div>
           </div>
-          <div className="health-metric" title="How well you're sticking to your budget limits">
+          <div className="health-metric">
             <div className="health-metric-label">Budget</div>
-            <div className="health-metric-value">{health.budgetScore}%</div>
-            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.budgetScore}%`, background: "var(--primary)" }} /></div>
+            <div className="health-metric-value">{health.budgetScore === null ? "—" : `${health.budgetScore}%`}</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.budgetScore ?? 0}%`, background: "var(--mint)" }} /></div>
           </div>
-          <div className="health-metric" title="How consistent your spending is month to month">
+          <div className="health-metric">
             <div className="health-metric-label">Stability</div>
-            <div className="health-metric-value">{health.stabilityScore}%</div>
-            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.stabilityScore}%`, background: "var(--primary)" }} /></div>
+            <div className="health-metric-value">{health.stabilityScore === null ? "—" : `${health.stabilityScore}%`}</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.stabilityScore ?? 0}%`, background: "var(--mint)" }} /></div>
           </div>
-          <div className="health-metric" title="Progress toward your savings goals">
+          <div className="health-metric">
             <div className="health-metric-label">Goals</div>
-            <div className="health-metric-value">{health.goalScore}%</div>
-            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.goalScore}%`, background: "var(--primary)" }} /></div>
+            <div className="health-metric-value">{health.goalScore === null ? "—" : `${health.goalScore}%`}</div>
+            <div className="health-metric-bar"><div className="health-metric-bar-fill" style={{ width: `${health.goalScore ?? 0}%`, background: "var(--mint)" }} /></div>
           </div>
         </div>
       </div>
@@ -2656,27 +1530,24 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
         {health.riskFactors.length > 0 && (
           <span className="risk-factors">• {health.riskFactors.join(" • ")}</span>
         )}
-        {health.riskFactors.length === 0 && health.hasData && (
+        {health.riskFactors.length === 0 && (
           <span className="risk-factors">• All metrics look good!</span>
         )}
       </div>
       
-      {insights.length > 0 && (
-        <div className="insight-cards">
-          {insights.map((insight, idx) => (
-            <div key={idx} className="insight-mini-card">
-              <span className="icon">{insight.icon}</span>
-              <span className="text">{insight.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="insight-cards">
+        {insights.map((insight, idx) => (
+          <div key={idx} className="insight-mini-card">
+            <span className="icon">{insight.icon}</span>
+            <span className="text">{insight.text}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── CONTACT PAGE ─────────────────────────────────────────────────────────────
-
 function ContactPage() {
   return (
     <div>
@@ -2712,7 +1583,6 @@ function ContactPage() {
 }
 
 // ─── WHAT-IF PAGE ─────────────────────────────────────────────────────────────
-
 function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddScenario, onDeleteScenario }) {
   const [habitName, setHabitName] = useState("");
   const [habitDays, setHabitDays] = useState(30);
@@ -2722,8 +1592,6 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   const [reducePercent, setReducePercent] = useState(10);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customForm, setCustomForm] = useState({ action: "", amount: "", frequency: "monthly", duration: "", durationUnit: "months" });
-  const [sliderValue, setSliderValue] = useState(10);
-  const [showTooltip, setShowTooltip] = useState(false);
   
   const grossIncome = incomes.reduce((sum, inc) => sum + inc.amount, 0);
   const monthlyIncome = grossIncome;
@@ -2770,13 +1638,6 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
     setShowCustomModal(false);
   };
   
-  // Slider tooltip micro-interaction
-  const handleSliderChange = (e) => {
-    const val = parseInt(e.target.value);
-    setSliderValue(val);
-    setReducePercent(val);
-  };
-  
   return (
     <div>
       <div className="page-header">
@@ -2804,26 +1665,8 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
       <div className="whatif-scenario">
         <div className="whatif-title">Scenario B: Reduce a category</div>
         <div className="whatif-input-group">
-          <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
-          <div className="whatif-field" style={{ position: "relative" }}>
-            <label>Reduce by (%)</label>
-            <div style={{ position: "relative", width: "100%" }}>
-              <input 
-                type="range" 
-                min="0" 
-                max="50" 
-                value={sliderValue} 
-                onChange={handleSliderChange}
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
-                style={{ width: "100%", cursor: "pointer", height: "6px", background: "var(--border)", borderRadius: "4px", outline: "none" }}
-              />
-              {showTooltip && (
-                <div className="slider-tooltip">{sliderValue}%</div>
-              )}
-            </div>
-            <span style={{ marginLeft: 8, fontWeight: 600 }}>{reducePercent}%</span>
-          </div>
+          <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
+          <div className="whatif-field"><label>Reduce by (%)</label><input type="range" min="0" max="50" value={reducePercent} onChange={e => setReducePercent(parseInt(e.target.value))} /><span style={{ marginLeft: 8 }}>{reducePercent}%</span></div>
         </div>
         <div className="whatif-output">
           <div className="whatif-output-text">Current monthly spend on {reduceCategory}: <strong>{formatMoney(monthlyCategorySpend, currency)}</strong></div>
@@ -2887,18 +1730,14 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
   );
 }
 
-// ─── DASHBOARD ──────────────────────────────────────────────────────────────
-
+// ─── DASHBOARD PAGE ──────────────────────────────────────────────────────────
 function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget, onAddIncome, onDeleteIncome, currency, onCurrencyChange, showToast }) {
   const [showIncomeModal, setShowIncomeModal] = useState(false);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showCreditedBreakdown, setShowCreditedBreakdown] = useState(false);
   const [incomeForm, setIncomeForm] = useState({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
-  const [budgetForm, setBudgetForm] = useState(DEFAULT_CATEGORIES.map(c => ({ category: c.name, amount: budgets.find(b => b.category === c.name)?.amount || "" })));
-  const [customCategories, setCustomCategories] = useState([]);
-  const [newCategoryName, setNewCategoryName] = useState("");
+  const [budgetForm, setBudgetForm] = useState(CATEGORIES.map(c => ({ category: c.name, amount: budgets.find(b => b.category === c.name)?.amount || "" })));
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState("all");
   
   const tagline = taglines[new Date().getDay() % taglines.length];
   
@@ -2908,6 +1747,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const freeCash = Math.max(0, totalIncome - totalSpent);
   
+  // Calculate savings progress as percentage
   const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
   const totalTarget = goals.reduce((s, g) => s + g.target, 0);
   const savingsProgress = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
@@ -2926,7 +1766,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     catMap[cat] = (catMap[cat] || 0) + t.amount;
   });
   const chartData = Object.entries(catMap).map(([name, value]) => {
-    const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { name, color: "#CBD5E0", icon: "📦" };
+    const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1];
     return { name, value, color: cat.color };
   }).sort((a, b) => b.value - a.value);
   
@@ -2938,6 +1778,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   
   const recent = [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
   
+  // Spending alerts
   useEffect(() => {
     if (transactions.length > 0) {
       const lastTx = transactions[0];
@@ -2976,19 +1817,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     showToast(`💰 Added ${formatMoney(parseFloat(incomeForm.amount), currency)} from ${incomeForm.source}`);
   };
   
-  const handleAddCustomCategory = () => {
-    if (!newCategoryName.trim()) return;
-    const name = newCategoryName.trim();
-    if (customCategories.includes(name) || DEFAULT_CATEGORIES.some(c => c.name === name)) {
-      showToast("Category already exists");
-      return;
-    }
-    setCustomCategories([...customCategories, name]);
-    setBudgetForm([...budgetForm, { category: name, amount: "" }]);
-    setNewCategoryName("");
-    showToast(`Added category: ${name}`);
-  };
-  
   const handleSaveAllBudgets = () => {
     const newBudgets = budgetForm.filter(b => b.amount && b.amount > 0).map(b => ({ category: b.category, amount: parseFloat(b.amount) }));
     onUpdateBudget(newBudgets);
@@ -2997,7 +1825,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   };
   
   const incomeSources = ["Salary", "Business", "Allowance", "Gift", "Side Hustle", "Other"];
-  const allCategories = [...DEFAULT_CATEGORIES.map(c => c.name), ...customCategories];
   
   return (
     <div>
@@ -3008,6 +1835,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       
       <div className="page-header"><div className="greeting">{getGreeting()}, <span className="greeting-name">{user.name} 👋</span></div><div className="greeting-tagline">{tagline}</div></div>
       
+      {/* ─── AI ADVISOR ─── */}
       <AIAdvisor 
         transactions={transactions}
         incomes={incomes}
@@ -3016,6 +1844,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         currency={currency}
       />
       
+      {/* ─── FINANCIAL HEALTH SCORE ─── */}
       <FinancialHealth 
         transactions={transactions}
         incomes={incomes}
@@ -3029,7 +1858,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         <div className="income-total">{formatMoney(grossIncome, currency)}</div>
         <div className="income-list">
           {incomes.length === 0 && (<div className="empty-text" style={{ textAlign: "center", padding: "12px" }}>No income sources added yet. Click + Add Income.</div>)}
-          {incomes.map(inc => (<div key={inc.id} className="income-row"><div><span className="income-type-badge">{inc.source}</span>{inc.label && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)" }}>— {inc.label}</span>}<div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{inc.date}</div></div><div><span className="income-amount">{formatMoney(inc.amount, currency)}</span><button className="income-delete" onClick={() => onDeleteIncome(inc.id)}>✕</button></div></div>))}
+          {incomes.map(inc => (<div key={inc.id} className="income-row"><div><span className="income-type-badge">{inc.source}</span>{inc.label && <span style={{ marginLeft: 8, fontSize: 12, color: "var(--muted)" }}>— {inc.label}</span>}<div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{inc.date}</div></div><div><span className="income-amount">{formatMoney(inc.amount, currency)}</span><button className="income-delete" onClick={() => onDeleteIncome(inc.id)}>✕</button></div></div>))}
         </div>
         {creditedTransactions.length > 0 && (
           <div className="credited-section">
@@ -3043,7 +1872,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
                     <div>
                       <span className="income-type-badge">{tx.incomeType || "Other"}</span>
                       <span style={{ marginLeft: 8, fontSize: 13 }}>{tx.description}</span>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{tx.date}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{tx.date}</div>
                     </div>
                     <div className="income-amount">+{formatMoney(tx.amount, currency)}</div>
                   </div>
@@ -3064,16 +1893,11 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         <div className="card"><div className="card-title">Spending by Category</div><DonutChart data={chartData} currency={currency} /></div>
         <div className="card"><div className="card-title">Monthly Budgets <button className="btn-outline" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => setShowBudgetModal(true)}>Edit All Budgets</button></div>
           {budgets.length === 0 ? (<div className="empty-state"><div className="empty-text">No budgets set. Click "Edit All Budgets" to start planning.</div></div>) : (
-            budgets.map((b, idx) => {
+            budgets.map(b => {
               const spent = categorySpending[b.category] || 0;
               const percent = (spent / b.amount) * 100;
               const isOver = spent > b.amount;
-              const isNearLimit = percent >= 90 && percent <= 100;
-              const barClass = isNearLimit ? 'budget-bar near-limit' : 'budget-bar';
-              const fillClass = isOver ? 'budget-fill red' : isNearLimit ? 'budget-fill yellow' : 'budget-fill green';
-              // Staggered animation delay
-              const delay = idx * 100;
-              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className={barClass}><div className={`${fillClass} animate`} style={{ '--bar-width': `${Math.min(percent, 100)}%`, width: `${Math.min(percent, 100)}%`, animationDelay: `${delay}ms` }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
+              return (<div key={b.category} className="budget-item"><div className="budget-header"><span className="budget-name">{b.category}</span><span className="budget-amount">{formatMoney(spent, currency)} / {formatMoney(b.amount, currency)}</span></div><div className="budget-bar"><div className="budget-fill" style={{ width: `${Math.min(percent, 100)}%`, background: isOver ? COLORS.danger : COLORS.mint }} /></div>{percent > 90 && <div className="budget-warning">{percent > 100 ? "⚠️ Over budget!" : "⚠️ Near limit"}</div>}</div>);
             })
           )}
         </div>
@@ -3082,35 +1906,37 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       <div className="card">
         <div className="card-title">Recent Transactions</div>
         {recent.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions yet</div><div className="empty-sub">Upload a bank statement to see your transactions</div></div>) : (
-          <div className="tx-list">{recent.map((t, i) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+          <div className="tx-list">{recent.map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
         )}
       </div>
       
       {showIncomeModal && (<div className="modal-overlay" onClick={() => setShowIncomeModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Income</div><label className="modal-label">Source Type</label><select className="modal-input" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} style={{ appearance: "auto" }}>{incomeSources.map(s => <option key={s} value={s}>{s}</option>)}</select><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Label (optional)</label><input className="modal-input" placeholder="e.g. Freelance project" value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddIncome}>Add Income</button></div></div></div>)}
       
-      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <input className="modal-input" style={{ flex: 1 }} placeholder="Add custom category..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} />
-          <button className="btn-outline" onClick={handleAddCustomCategory}>+ Add</button>
-        </div>
-        <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
-          {budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}
-        </div>
-        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
+      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p><div style={{ maxHeight: "60vh", overflowY: "auto" }}>{budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
     </div>
   );
 }
 
 // ─── UPLOAD PAGE ─────────────────────────────────────────────────────────────
-
 function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   const [dragover, setDragover] = useState(false);
   const [preview, setPreview] = useState(null);
   const [csvPreview, setCsvPreview] = useState(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractStatus, setExtractStatus] = useState("");
+  const [extractError, setExtractError] = useState("");
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptStatus, setReceiptStatus] = useState("");
+  const [receiptError, setReceiptError] = useState("");
+  const [receiptResult, setReceiptResult] = useState(null); // { imageUrl, amount, merchant, date, category }
   const [showAddModal, setShowAddModal] = useState(false);
   const [multipleTransactions, setMultipleTransactions] = useState([
     { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
   ]);
+  const [addForm, setAddForm] = useState({
+    description: "", amount: "", date: new Date().toISOString().split("T")[0],
+    type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: ""
+  });
   const fileRef = useRef();
   
   const handleAddTag = (e, setter, currentTags) => {
@@ -3126,6 +1952,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   
   const removeTag = (tag, currentTags, setter) => setter(currentTags.filter(t => t !== tag));
   
+  // Handle multiple transactions
   const addTransactionRow = () => {
     setMultipleTransactions([
       ...multipleTransactions,
@@ -3172,26 +1999,109 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     showToast(`${newTx.length} transactions added!`);
   };
   
-  // SECURITY FIX: PDF upload now shows warning instead of generating fake data
+  const handleAddTransaction = () => {
+    if (!addForm.description || !addForm.amount || addForm.amount <= 0) return;
+    const finalCategory = addForm.category === "Other" && addForm.customCategory ? addForm.customCategory : addForm.category;
+    const newTx = {
+      id: Date.now(),
+      date: addForm.date,
+      description: addForm.description,
+      amount: parseFloat(addForm.amount),
+      type: addForm.type,
+      category: finalCategory,
+      customCategory: addForm.category === "Other" && addForm.customCategory ? addForm.customCategory : "",
+      tags: addForm.tags,
+      notes: addForm.notes,
+      splits: [],
+      incomeType: addForm.type === "credit" ? addForm.incomeType : "",
+      isRecurring: false
+    };
+    onUpload([newTx], `manual-${Date.now()}`, "Manual Entry");
+    setShowAddModal(false);
+    setAddForm({ description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: "" });
+  };
+  
   const handleFile = (file) => {
     if (!file) return;
-    
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      showToast("📄 Please use CSV format. PDF extraction is not supported — upload a CSV file instead.");
+    setExtractError("");
+
+    if (file.name.toLowerCase().endsWith('.csv')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        const transactions = parseCSV(content);
+        if (transactions.length === 0) {
+          setExtractError("No transactions could be read from this CSV. Check the file's column format.");
+          return;
+        }
+        setCsvPreview({ filename: file.name, transactions, fileKey: simpleHash(content.substring(0, 500) + file.lastModified) });
+      };
+      reader.readAsText(file);
       return;
     }
-    
+
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      setExtracting(true);
+      setExtractStatus("Starting extraction...");
+      extractTransactionsFromPDF(file, currency, setExtractStatus)
+        .then(transactions => {
+          setPreview({ filename: file.name, fileKey: simpleHash(`${file.name}-${file.size}-${file.lastModified}`), transactions });
+        })
+        .catch(err => {
+          console.error('PDF extraction error:', err);
+          setExtractError(err.message || "Couldn't extract transactions from this PDF.");
+        })
+        .finally(() => { setExtracting(false); setExtractStatus(""); });
+      return;
+    }
+
+    setExtractError("Unsupported file type. Please upload a .csv or .pdf file.");
+  };
+
+  const handleReceiptFile = (file) => {
+    if (!file) return;
+    setReceiptError("");
+    setReceiptResult(null);
+    setReceiptLoading(true);
+    setReceiptStatus("Reading image...");
+
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target.result;
-      let transactions = [];
-      if (file.name.endsWith('.csv')) {
-        transactions = parseCSV(content);
-        const fileKey = simpleHash(content.substring(0, 1000) + file.lastModified + Date.now());
-        setCsvPreview({ filename: file.name, transactions, fileKey });
-      }
+    reader.onload = (ev) => {
+      const imageUrl = ev.target.result;
+      extractTransactionFromReceipt(file, currency, setReceiptStatus)
+        .then(tx => {
+          if (!tx) throw new Error("Couldn't identify a transaction on this receipt.");
+          setReceiptResult({
+            imageUrl,
+            amount: tx.amount.toFixed(2),
+            merchant: tx.description,
+            date: tx.date,
+            category: tx.category
+          });
+        })
+        .catch(err => {
+          console.error('Receipt OCR error:', err);
+          setReceiptError(err.message || "Couldn't read this receipt. Try a clearer photo.");
+        })
+        .finally(() => { setReceiptLoading(false); setReceiptStatus(""); });
     };
-    reader.readAsText(file);
+    reader.readAsDataURL(file);
+  };
+
+  const confirmReceiptTransaction = () => {
+    if (!receiptResult) return;
+    const amount = parseFloat(receiptResult.amount);
+    if (!amount || !receiptResult.merchant) {
+      showToast?.("Please fill in amount and merchant before saving.");
+      return;
+    }
+    const newTx = [{
+      id: Date.now(), date: receiptResult.date, description: receiptResult.merchant,
+      amount, type: "debit", category: receiptResult.category || "Other", customCategory: "",
+      tags: [], notes: "", splits: [], incomeType: "", isRecurring: false
+    }];
+    handleConfirmUpload(newTx, `receipt-${Date.now()}`, `Receipt-${receiptResult.merchant}`);
+    setReceiptResult(null);
   };
   
   const handleConfirmUpload = (transactions, fileKey, filename) => {
@@ -3211,18 +2121,29 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
     <div>
       <div className="page-header">
         <div className="greeting" style={{ fontSize: 24 }}>Upload & Add Transactions</div>
-        <div className="greeting-tagline">Import bank statements (CSV format only) or add transactions manually</div>
+        <div className="greeting-tagline">Import bank statements or add transactions manually</div>
       </div>
       
       {!preview && !csvPreview ? (
         <>
           <div className={`upload-zone ${dragover ? "dragover" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragover(true); }} onDragLeave={() => setDragover(false)} onDrop={handleDrop} onClick={() => fileRef.current.click()}>
-            <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div>
-            <div className="upload-sub"><strong>CSV files</strong> only. PDF support is not available.</div>
+            <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div><div className="upload-sub">Supports CSV and PDF (text or scanned) bank statements.</div>
             <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
-            <div className="format-pills"><span className="format-pill">CSV ✓</span><span className="format-pill">PDF ✗</span></div>
-            <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
+            <div className="format-pills"><span className="format-pill">CSV</span><span className="format-pill">PDF</span></div>
+            <input ref={fileRef} type="file" accept=".csv,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
+
+          {extracting && (
+            <div className="card" style={{ marginTop: 16, textAlign: "center" }}>
+              <div className="spinner" style={{ margin: "0 auto 12px" }} />
+              <div style={{ fontSize: 14, color: "var(--muted)" }}>{extractStatus || "Processing..."}</div>
+            </div>
+          )}
+          {extractError && (
+            <div className="card" style={{ marginTop: 16, borderColor: "var(--danger, #FC8181)" }}>
+              <div style={{ fontSize: 14 }}>⚠️ {extractError}</div>
+            </div>
+          )}
           
           <div className="card" style={{ marginBottom: 24 }}>
             <div className="card-title">✏️ Add Multiple Transactions</div>
@@ -3231,10 +2152,26 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
           
           <div className="card scan-card">
             <div className="card-title">📷 Scan a Receipt</div>
-            <div style={{ textAlign: "center", padding: "20px" }}>
-              <div className="empty-icon">📸</div>
-              <div className="empty-text">Coming soon</div>
-              <div className="empty-sub">Receipt scanning with OCR is in development and will be available in a future update.</div>
+            <div style={{ textAlign: "center" }}>
+              <input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => handleReceiptFile(e.target.files[0])} />
+              <button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button>
+
+              {receiptLoading && (<div className="shimmer">📄 {receiptStatus || "Processing receipt..."}</div>)}
+              {receiptError && (<div style={{ color: "var(--danger, #FC8181)", fontSize: 14, marginTop: 8 }}>⚠️ {receiptError}</div>)}
+
+              {receiptResult && (
+                <div style={{ marginTop: 16, textAlign: "left" }}>
+                  <img src={receiptResult.imageUrl} style={{ width: 80, height: 80, borderRadius: 12, objectFit: "cover", display: "block", margin: "0 auto 12px" }} />
+                  <label className="modal-label" style={{ marginTop: 0 }}>Amount</label>
+                  <input className="modal-input" value={receiptResult.amount} onChange={e => setReceiptResult({ ...receiptResult, amount: e.target.value })} />
+                  <label className="modal-label">Merchant</label>
+                  <input className="modal-input" value={receiptResult.merchant} onChange={e => setReceiptResult({ ...receiptResult, merchant: e.target.value })} />
+                  <label className="modal-label">Date</label>
+                  <input className="modal-input" type="date" value={receiptResult.date} onChange={e => setReceiptResult({ ...receiptResult, date: e.target.value })} />
+                  <button className="btn-save" style={{ marginTop: 16, width: "100%" }} onClick={confirmReceiptTransaction}>Add as Transaction →</button>
+                </div>
+              )}
+              {!receiptLoading && !receiptResult && <div className="empty-sub" style={{ marginTop: 12 }}>Photo is OCR'd and parsed by AI — review before saving</div>}
             </div>
           </div>
           
@@ -3242,17 +2179,18 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
         </>
       ) : (
         <div>
-          <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {(preview?.filename || csvPreview?.filename)}</div><p style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 16 }}>Found {(preview?.transactions || csvPreview?.transactions).length} transactions. Review and confirm below.</p>
-            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+          <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {(preview?.filename || csvPreview?.filename)}</div><p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 16 }}>Found {(preview?.transactions || csvPreview?.transactions).length} transactions. Review and confirm below.</p>
+            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
           </div>
           <div style={{ display: "flex", gap: 12 }}><button className="btn-cancel" onClick={() => { setPreview(null); setCsvPreview(null); }}>Cancel</button><button className="btn-save" onClick={() => handleConfirmUpload(preview?.transactions || csvPreview?.transactions, preview?.fileKey || csvPreview?.fileKey, preview?.filename || csvPreview?.filename)}>Confirm & Save →</button></div>
         </div>
       )}
       
+      {/* Multiple Transactions Modal */}
       {showAddModal && (<div className="modal-overlay" onClick={() => setShowAddModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700, maxHeight: "80vh", overflowY: "auto" }}><div className="modal-title">Add Multiple Transactions</div>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>Add multiple transactions at once. All fields are editable.</p>
+        <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Add multiple transactions at once. All fields are editable.</p>
         {multipleTransactions.map((tx, idx) => (
-          <div key={tx.id} style={{ background: "var(--bg)", padding: 12, borderRadius: 4, marginBottom: 12, border: "1px solid var(--border)" }}>
+          <div key={tx.id} style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 12, border: "1px solid var(--border)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>Transaction {idx + 1}</span>
               {multipleTransactions.length > 1 && (
@@ -3264,7 +2202,7 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
               <div><label className="modal-label" style={{ marginTop: 0 }}>Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={tx.amount} onChange={e => updateTransactionRow(tx.id, "amount", e.target.value)} /></div>
               <div><label className="modal-label" style={{ marginTop: 0 }}>Date</label><input className="modal-input" type="date" value={tx.date} onChange={e => updateTransactionRow(tx.id, "date", e.target.value)} /></div>
               <div><label className="modal-label" style={{ marginTop: 0 }}>Type</label><div style={{ display: "flex", gap: 4 }}><button className={`auth-tab ${tx.type === "debit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "debit")}>Debit</button><button className={`auth-tab ${tx.type === "credit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "credit")}>Credit</button></div></div>
-              <div><label className="modal-label" style={{ marginTop: 0 }}>Category</label><select className="modal-input" value={tx.category} onChange={e => updateTransactionRow(tx.id, "category", e.target.value)} style={{ fontSize: 13 }}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Category</label><select className="modal-input" value={tx.category} onChange={e => updateTransactionRow(tx.id, "category", e.target.value)} style={{ fontSize: 13 }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
               {tx.category === "Other" && (
                 <div><label className="modal-label" style={{ marginTop: 0 }}>Custom Category</label><input className="modal-input" placeholder="e.g., Fuel, Gift" value={tx.customCategory} onChange={e => updateTransactionRow(tx.id, "customCategory", e.target.value)} /></div>
               )}
@@ -3280,7 +2218,6 @@ function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
 }
 
 // ─── TRANSACTIONS PAGE ─────────────────────────────────────────────────────
-
 function TransactionsPage({ transactions, setTransactions, currency, showToast }) {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
@@ -3356,7 +2293,6 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
   };
   
   const handleBulkRecategorise = (newCategory) => {
-    // Clear selection after recategorisation
     setTransactions(transactions.map(tx => selectedTxIds.has(tx.id) ? { ...tx, category: newCategory } : tx));
     setSelectedTxIds(new Set());
     setBulkMode(false);
@@ -3391,14 +2327,19 @@ function TransactionsPage({ transactions, setTransactions, currency, showToast }
 
 Provide a short, useful explanation of what this transaction represents in their financial picture.`;
       
-      const result = await callAIService(prompt);
+      const result = await callNVIDIA(prompt);
+      if (result.error) {
+        setExplanationText(result.message);
+        setExplanationLoading(false);
+        return;
+      }
       let explanation = result.raw || JSON.stringify(result);
       explanation = explanation.replace(/\{[\s\S]*\}/, '').trim() || explanation;
       if (explanation.length > 500) explanation = explanation.substring(0, 500) + "...";
-      setExplanationText(explanation || "This transaction appears to be a standard purchase. No specific insights available.");
+      setExplanationText(explanation || "AI didn't return an explanation for this transaction.");
     } catch (error) {
       console.error('Explanation error:', error);
-      setExplanationText("This transaction appears to be a standard purchase. No specific insights available.");
+      setExplanationText("Couldn't generate an explanation right now. Please try again.");
     }
     setExplanationLoading(false);
   };
@@ -3410,11 +2351,6 @@ Provide a short, useful explanation of what this transaction represents in their
       setSelectedTxIds(new Set(filtered.map(t => t.id)));
     }
   };
-  
-  // Clear selection when filter changes (UX fix)
-  useEffect(() => {
-    setSelectedTxIds(new Set());
-  }, [activeFilter, search]);
   
   return (
     <div>
@@ -3435,11 +2371,11 @@ Provide a short, useful explanation of what this transaction represents in their
       
       <div className="filter-chips">{quickFilters.map(f => (<button key={f.id} className={`filter-chip ${activeFilter === f.id ? "active" : ""}`} onClick={() => setActiveFilter(f.id)}>{f.label}</button>))}</div>
       
-      {showCalendar && (<div className="card" style={{ marginBottom: 20 }}><div className="card-title">📅 Calendar View - {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</div><div className="calendar-grid">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (<div key={d} className="calendar-day-header">{d}</div>))}{getMonthTransactions().map((day, idx) => (<div key={idx} className="calendar-day">{day ? (<><div className="calendar-day-num">{day.day}</div>{day.transactions.slice(0, 3).map(tx => (<div key={tx.id} className={`calendar-tx ${tx.type}`} title={`${tx.description}: ${formatMoney(tx.amount, currency)}`}>{tx.description.substring(0, 12)}</div>))}{day.transactions.length > 3 && <div style={{ fontSize: 10, color: "var(--text-muted)" }}>+{day.transactions.length - 3} more</div>}</>) : null}</div>))}</div></div>)}
+      {showCalendar && (<div className="card" style={{ marginBottom: 20 }}><div className="card-title">📅 Calendar View - {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</div><div className="calendar-grid">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => (<div key={d} className="calendar-day-header">{d}</div>))}{getMonthTransactions().map((day, idx) => (<div key={idx} className="calendar-day">{day ? (<><div className="calendar-day-num">{day.day}</div>{day.transactions.slice(0, 3).map(tx => (<div key={tx.id} className={`calendar-tx ${tx.type}`} title={`${tx.description}: ${formatMoney(tx.amount, currency)}`}>{tx.description.substring(0, 12)}</div>))}{day.transactions.length > 3 && <div style={{ fontSize: 10, color: "var(--muted)" }}>+{day.transactions.length - 3} more</div>}</>) : null}</div>))}</div></div>)}
       
       <div className="card">
         {filtered.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions found</div><div className="empty-sub">Try a different search or filter</div></div>) : (
-          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); getExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = DEFAULT_CATEGORIES.find(c => c.name === split.category) || { color: "#CBD5E0", icon: "📦" }; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
+          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); getExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
         )}
       </div>
       
@@ -3451,21 +2387,20 @@ Provide a short, useful explanation of what this transaction represents in their
         </div>
       )}
       
-      {bulkMode && selectedTxIds.size > 0 && (<div className="bulk-bar"><span className="selected-count">{selectedTxIds.size} selected</span><div className="bulk-actions"><button className="bulk-recategorise" onClick={() => { const cat = prompt("Enter new category name"); if (cat) handleBulkRecategorise(cat); }}>Recategorise</button><button className="bulk-delete" onClick={handleBulkDelete}>Delete</button><button className="bulk-cancel" onClick={() => { setBulkMode(false); setSelectedTxIds(new Set()); }}>Cancel</button></div></div>)}
+      {bulkMode && selectedTxIds.size > 0 && (<div className="bulk-bar"><span className="selected-count">{selectedTxIds.size} selected</span><div className="bulk-actions"><button className="bulk-recategorise" onClick={() => { const cat = prompt("Enter new category name"); if (cat && CATEGORIES.some(c => c.name === cat)) handleBulkRecategorise(cat); else if (cat) showToast("Category not found"); }}>Recategorise</button><button className="bulk-delete" onClick={handleBulkDelete}>Delete</button><button className="bulk-cancel" onClick={() => { setBulkMode(false); setSelectedTxIds(new Set()); }}>Cancel</button></div></div>)}
       
       {showNoteModal && (<div className="modal-overlay" onClick={() => setShowNoteModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Note & Tags</div><label className="modal-label">Notes</label><textarea className="modal-input" rows="3" placeholder="Add a note..." defaultValue={showNoteModal.notes} onChange={e => showNoteModal.notes = e.target.value} /><label className="modal-label">Tags</label><div className="tags-input" id="note-tags-container">{showNoteModal.tags.map(tag => (<span key={tag} className="tag-chip">{tag}<button onClick={() => { showNoteModal.tags = showNoteModal.tags.filter(t => t !== tag); document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join(""); }}>✕</button></span>))}<input className="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input" onKeyDown={(e) => { if (e.key === "Enter" || e.key === "," || e.key === " ") { e.preventDefault(); const val = e.target.value.trim(); if (val && !showNoteModal.tags.includes(val)) { showNoteModal.tags.push(val); e.target.value = ""; document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join("") + '<input class="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input">'; const newInput = document.getElementById("note-tag-input"); if (newInput) newInput.focus(); } } }} /></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowNoteModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const notes = document.querySelector(".modal textarea").value; const tagChips = document.querySelectorAll("#note-tags-container .tag-chip"); const tags = Array.from(tagChips).map(chip => chip.childNodes[0].textContent); handleUpdateNotesTags(showNoteModal.txId, notes, tags); }}>Save</button></div></div></div>)}
       
-      {showSplitModal && (<div className="modal-overlay" onClick={() => setShowSplitModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 550 }}><div className="modal-title">Split Transaction</div><div style={{ background: "var(--bg)", padding: 12, borderRadius: 4, marginBottom: 16 }}><div>Original: {showSplitModal.description}</div><div style={{ fontWeight: 700 }}>Amount: {formatMoney(showSplitModal.amount, currency)}</div></div>{splitLines.map((line, idx) => (<div key={idx} className="split-line"><div className="split-header"><span className="split-title">Split {idx + 1}</span>{splitLines.length > 1 && <button className="split-remove" onClick={() => setSplitLines(splitLines.filter((_, i) => i !== idx))}>✕</button>}</div><div className="split-fields"><input placeholder="Description" value={line.description} onChange={e => { const newLines = [...splitLines]; newLines[idx].description = e.target.value; setSplitLines(newLines); }} /><input type="number" step="0.01" placeholder="Amount" value={line.amount} onChange={e => { const newLines = [...splitLines]; newLines[idx].amount = e.target.value; setSplitLines(newLines); }} /><select value={line.category} onChange={e => { const newLines = [...splitLines]; newLines[idx].category = e.target.value; setSplitLines(newLines); }}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div></div>))}<button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={() => setSplitLines([...splitLines, { description: "", amount: "", category: "Other" }])}>+ Add Split Line</button><div className="split-total"><span>Total allocated:</span><span>{formatMoney(splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="split-total"><span>Unallocated:</span><span className="split-remainder">{formatMoney(showSplitModal.amount - splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSplitModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleSaveSplit(showSplitModal)}>Save Split</button></div></div></div>)}
+      {showSplitModal && (<div className="modal-overlay" onClick={() => setShowSplitModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 550 }}><div className="modal-title">Split Transaction</div><div style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 16 }}><div>Original: {showSplitModal.description}</div><div style={{ fontWeight: 700 }}>Amount: {formatMoney(showSplitModal.amount, currency)}</div></div>{splitLines.map((line, idx) => (<div key={idx} className="split-line"><div className="split-header"><span className="split-title">Split {idx + 1}</span>{splitLines.length > 1 && <button className="split-remove" onClick={() => setSplitLines(splitLines.filter((_, i) => i !== idx))}>✕</button>}</div><div className="split-fields"><input placeholder="Description" value={line.description} onChange={e => { const newLines = [...splitLines]; newLines[idx].description = e.target.value; setSplitLines(newLines); }} /><input type="number" step="0.01" placeholder="Amount" value={line.amount} onChange={e => { const newLines = [...splitLines]; newLines[idx].amount = e.target.value; setSplitLines(newLines); }} /><select value={line.category} onChange={e => { const newLines = [...splitLines]; newLines[idx].category = e.target.value; setSplitLines(newLines); }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div></div>))}<button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={() => setSplitLines([...splitLines, { description: "", amount: "", category: "Other" }])}>+ Add Split Line</button><div className="split-total"><span>Total allocated:</span><span>{formatMoney(splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="split-total"><span>Unallocated:</span><span className="split-remainder">{formatMoney(showSplitModal.amount - splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSplitModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleSaveSplit(showSplitModal)}>Save Split</button></div></div></div>)}
       
-      {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{DEFAULT_CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
+      {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
       
-      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 4, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing transaction...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
+      {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing transaction...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
     </div>
   );
 }
 
 // ─── INSIGHTS PAGE ───────────────────────────────────────────────────────────
-
 function InsightsPage({ transactions, currency }) {
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const totalCredit = transactions.filter(t => t.type === "credit").reduce((s, t) => s + t.amount, 0);
@@ -3543,8 +2478,9 @@ function InsightsPage({ transactions, currency }) {
   
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}
   
+  {/* Savings insight */}
   {transactions.length > 0 && (
-    <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, var(--primary)20, var(--secondary))" : "linear-gradient(135deg, var(--error)20, var(--secondary))" }}>
+    <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, #00C89620, #1A1A2E)" : "linear-gradient(135deg, #FF475720, #1A1A2E)" }}>
       <div className="insight-label">{savings > 0 ? "💰 Savings" : "📊 Spending"}</div>
       <div className="insight-text">
         {savings > 0 
@@ -3555,11 +2491,10 @@ function InsightsPage({ transactions, currency }) {
     </div>
   )}
   
-  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { color: "#CBD5E0", icon: "📦" }; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--primary)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, var(--error)20, var(--secondary))" : "linear-gradient(135deg, var(--secondary) 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "var(--warning)" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "var(--warning)" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
+  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
 }
 
 // ─── GOALS PAGE ──────────────────────────────────────────────────────────────
-
 function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   const [showModal, setShowModal] = useState(false);
   const [showContributeModal, setShowContributeModal] = useState(null);
@@ -3579,12 +2514,11 @@ function GoalsPage({ goals, onAdd, onContribute, currency, showToast }) {
   };
   
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Goals</div><div className="greeting-tagline">Track what you're saving toward</div></div><div className="goals-grid">{goals.length === 0 && (<div style={{ gridColumn: "1/-1" }}><div className="empty-state" style={{ padding: "60px 20px" }}><div className="empty-icon">🎯</div><div className="empty-text">No goals yet. Add one.</div><div className="empty-sub">Set a saving target and track your progress</div></div></div>)}{goals.map((g) => { const pct = g.target > 0 ? Math.min((g.saved / g.target) * 100, 100) : 0; const weekly = g.deadline ? Math.max(0, (g.target - g.saved) / Math.max(1, Math.ceil((new Date(g.deadline) - new Date()) / (7 * 86400000)))) : null; return (<div key={g.id} className="goal-card"><div className="goal-header"><div className="goal-name">{g.name}</div><div className="goal-emoji">{g.emoji}</div></div><div className="goal-amounts"><div className="goal-saved">{formatMoney(g.saved, currency)}</div><div className="goal-target">of {formatMoney(g.target, currency)}</div></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div><div className="goal-meta">{pct.toFixed(0)}% complete{weekly !== null && ` · Save ${formatMoney(weekly, currency)}/week`}{g.deadline && ` · Due ${g.deadline}`}</div><button className="btn-outline" style={{ marginTop: 12, width: "100%" }} onClick={() => setShowContributeModal(g)}>+ Add to Goal</button></div>); })}<button className="add-goal-card" onClick={() => setShowModal(true)}><div className="add-goal-icon">+</div><div className="add-goal-text">Add a goal</div></button></div>
-  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "var(--primary)20" : "none", border: `1px solid ${form.emoji === e ? "var(--primary)" : "var(--border)"}`, borderRadius: 4, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className="btn-save" onClick={handleSave}>Save Goal</button></div></div></div>)}
+  {showModal && (<div className="modal-overlay" onClick={() => setShowModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">New Saving Goal</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>{emojis.map(e => (<button key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{ fontSize: 22, background: form.emoji === e ? "#00C89620" : "none", border: `1px solid ${form.emoji === e ? "#00C896" : "var(--border)"}`, borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}>{e}</button>))}</div><label className="modal-label">Goal Name</label><input className="modal-input" placeholder="e.g. Trip to Cape Town" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /><label className="modal-label">Target Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="5000" step="0.01" value={form.target} onChange={e => setForm(f => ({ ...f, target: e.target.value }))} /><label className="modal-label">Deadline (optional)</label><input className="modal-input" type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button><button className="btn-save" onClick={handleSave}>Save Goal</button></div></div></div>)}
   {showContributeModal && (<div className="modal-overlay" onClick={() => setShowContributeModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add to {showContributeModal.name}</div><label className="modal-label">Amount to contribute ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={contributeAmount} onChange={e => setContributeAmount(e.target.value)} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowContributeModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleContribute(showContributeModal.id)}>Contribute</button></div></div></div>)}</div>);
 }
 
 // ─── SETTINGS PAGE ───────────────────────────────────────────────────────────
-
 function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange, theme, onThemeChange, textSize, onTextSizeChange, transactions, goals, incomes, budgets, customScenarios, onRestoreData, showToast }) {
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
   const handleCurrencyChange = (newCurrency) => { if (!currencyConfirmShown) { showToast(`✅ Currency selected: ${CURRENCIES[newCurrency].name}. All amounts will be treated and registered as ${CURRENCIES[newCurrency].symbol}.`); setCurrencyConfirmShown(true); } onCurrencyChange(newCurrency); };
@@ -3623,7 +2557,6 @@ function SettingsPage({ user, onLogout, onClearData, currency, onCurrencyChange,
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-
 export default function SpendSight() {
   const [user, setUser] = useLocalStorage("ss_user", null);
   const [transactions, setTransactions] = useLocalStorage("ss_transactions", []);
@@ -3645,6 +2578,7 @@ export default function SpendSight() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const lastActivityRef = useRef(Date.now());
   
+  // PWA install prompt
   useEffect(() => {
     const handler = (e) => {
       e.preventDefault();
@@ -3666,6 +2600,7 @@ export default function SpendSight() {
   
   const dismissInstall = () => { setShowInstallPrompt(false); localStorage.setItem("install_dismissed", "true"); };
   
+  // Session timeout
   useEffect(() => {
     if (!user) return;
     const resetTimer = () => { lastActivityRef.current = Date.now(); if (sessionExpired) setSessionExpired(false); };
@@ -3675,6 +2610,7 @@ export default function SpendSight() {
     return () => { events.forEach(event => document.removeEventListener(event, resetTimer)); clearInterval(interval); };
   }, [user, sessionExpired]);
   
+  // Apply text size
   useEffect(() => { const html = document.documentElement; html.classList.remove("text-small", "text-normal", "text-large", "text-xlarge"); html.classList.add(`text-${textSize}`); }, [textSize]);
   useEffect(() => { const html = document.documentElement; if (theme === "dark") html.classList.add("dark"); else if (theme === "light") html.classList.remove("dark"); else { const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches; if (prefersDark) html.classList.add("dark"); else html.classList.remove("dark"); } }, [theme]);
   useEffect(() => { if (theme !== "system") return; const mq = window.matchMedia("(prefers-color-scheme: dark)"); const handler = (e) => { if (e.matches) document.documentElement.classList.add("dark"); else document.documentElement.classList.remove("dark"); }; mq.addEventListener("change", handler); return () => mq.removeEventListener("change", handler); }, [theme]);
@@ -3750,7 +2686,7 @@ export default function SpendSight() {
   ];
   
   if (!user) { return (<><style>{css}</style><div className="auth-screen"><div className="auth-card"><div className="auth-logo"><span className="auth-logo-text">Spend<span style={{ color: "#00C896" }}>Sight</span></span></div><div className="auth-tagline">Your money, your clarity.</div><div className="auth-tabs"><button className={`auth-tab ${authTab === "login" ? "active" : ""}`} onClick={() => setAuthTab("login")}>Sign In</button><button className={`auth-tab ${authTab === "signup" ? "active" : ""}`} onClick={() => setAuthTab("signup")}>Sign Up</button></div>{authTab === "signup" && (<div className="form-group"><label className="form-label">Your Name</label><input className="form-input" placeholder="e.g. El" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>)}<div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" placeholder="you@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div><div className="form-group"><label className="form-label">Password</label><input className="form-input" type="password" placeholder="••••••••" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div><button className="btn-primary" onClick={handleAuth}>{authTab === "login" ? "Sign In →" : "Create Account →"}</button></div></div>{toast && <div className="toast">{toast}</div>}</>); }
-  if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--text-muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
+  if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
   if (sessionExpired) { return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>); }
   
   return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
