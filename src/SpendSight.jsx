@@ -50,8 +50,8 @@ const taglines = [
   "Every pula tells a story.",
 ];
 
-// Updated CATEGORIES with Savings as a default category
-const CATEGORIES = [
+// Default categories (users can add more)
+const DEFAULT_CATEGORIES = [
   { name: "Groceries",    icon: "🛒", color: "#00C896" },
   { name: "Transport",    icon: "🚗", color: "#4299E1" },
   { name: "Entertainment",icon: "🎬", color: "#9F7AEA" },
@@ -107,7 +107,7 @@ function simpleHash(str) {
   return Math.abs(hash).toString(36);
 }
 
-// Parse CSV with flexible column detection
+// ─── CSV PARSING ──────────────────────────────────────────────────────────────
 function parseCSV(csvText) {
   const lines = csvText.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -251,6 +251,30 @@ function getMockResponse(prompt) {
 // ─── FINANCIAL HEALTH ENGINE ──────────────────────────────────────────────
 
 function calculateFinancialHealth(transactions, incomes, goals, budgets) {
+  // Check if there's actual data
+  const hasData = transactions.length > 0 || incomes.length > 0 || goals.length > 0;
+  
+  if (!hasData) {
+    return {
+      score: 0,
+      grade: "No Data",
+      savingsRate: 0,
+      savingsScore: 0,
+      budgetScore: 0,
+      stabilityScore: 0,
+      goalScore: 0,
+      debtScore: 0,
+      riskLevel: "green",
+      riskLabel: "No Data",
+      riskFactors: [],
+      totalIncome: 0,
+      totalSpent: 0,
+      savings: 0,
+      monthOverMonthChange: 0,
+      hasData: false
+    };
+  }
+  
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
@@ -295,7 +319,7 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     budgetScore = totalBudget > 0 ? (totalSpentBudgeted / totalBudget) * 100 : 100;
     budgetScore = Math.min(100, budgetScore);
   } else {
-    budgetScore = 50;
+    budgetScore = 0; // No budgets = no score
   }
   
   const prevMonthSpent = prevMonthTxs.filter(t => t.type === "debit").reduce((sum, t) => sum + t.amount, 0);
@@ -304,6 +328,10 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     const variance = Math.abs((totalSpent - prevMonthSpent) / prevMonthSpent);
     stabilityScore = Math.max(0, 100 - (variance * 100));
     stabilityScore = Math.min(100, stabilityScore);
+  } else if (totalSpent > 0 && prevMonthSpent === 0) {
+    stabilityScore = 50; // First month of data
+  } else {
+    stabilityScore = 0;
   }
   
   let goalScore = 0;
@@ -314,7 +342,7 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     }, 0);
     goalScore = goalProgress / goals.length;
   } else {
-    goalScore = 50;
+    goalScore = 0;
   }
   
   const totalCredit = transactions.filter(t => t.type === "credit").reduce((sum, t) => sum + t.amount, 0);
@@ -330,10 +358,10 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
   );
   
   const riskFactors = [];
-  if (savingsRate < 10) riskFactors.push("Low savings rate");
-  if (budgetScore < 70) riskFactors.push("Budget overruns");
-  if (stabilityScore < 60) riskFactors.push("Unstable spending");
-  if (debtScore < 50) riskFactors.push("High debt burden");
+  if (savingsRate < 10 && totalIncome > 0) riskFactors.push("Low savings rate");
+  if (budgetScore < 70 && budgetScore > 0) riskFactors.push("Budget overruns");
+  if (stabilityScore < 60 && stabilityScore > 0) riskFactors.push("Unstable spending");
+  if (debtScore < 50 && totalIncome > 0) riskFactors.push("High debt burden");
   
   let riskLevel = "green";
   let riskLabel = "Low Risk";
@@ -362,7 +390,8 @@ function calculateFinancialHealth(transactions, incomes, goals, budgets) {
     totalIncome: totalIncome,
     totalSpent: totalSpent,
     savings: savings,
-    monthOverMonthChange: prevMonthSpent > 0 ? Math.round(((totalSpent - prevMonthSpent) / prevMonthSpent) * 100) : 0
+    monthOverMonthChange: prevMonthSpent > 0 ? Math.round(((totalSpent - prevMonthSpent) / prevMonthSpent) * 100) : 0,
+    hasData: true
   };
 }
 
@@ -540,6 +569,7 @@ const css = `
     align-items: center;
     gap: 12px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
   }
   .ai-advisor-badge {
     background: var(--mint);
@@ -550,6 +580,17 @@ const css = `
     font-weight: 700;
     text-transform: uppercase;
   }
+  .ai-advisor-status {
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: calc(10px * var(--text-scale));
+    font-weight: 600;
+  }
+  .ai-advisor-status.ready { background: var(--muted); color: white; }
+  .ai-advisor-status.thinking { background: #F6C90E; color: var(--navy-deep); }
+  .ai-advisor-status.live { background: var(--mint); color: var(--navy-deep); }
+  .ai-advisor-status.error { background: var(--danger); color: white; }
+  .ai-advisor-status.offline { background: var(--danger); color: white; }
   .ai-advisor-summary {
     font-size: calc(16px * var(--text-scale));
     font-weight: 600;
@@ -693,6 +734,11 @@ const css = `
     border-radius: 2px;
     transition: width 0.6s ease;
   }
+  .health-no-data {
+    text-align: center;
+    padding: 20px;
+    color: var(--muted);
+  }
 
   .risk-meter {
     display: flex;
@@ -712,6 +758,7 @@ const css = `
   .risk-dot.green { background: var(--risk-green); }
   .risk-dot.yellow { background: var(--risk-yellow); }
   .risk-dot.red { background: var(--risk-red); }
+  .risk-dot.gray { background: var(--muted); }
   .risk-label {
     font-weight: 600;
     font-size: calc(13px * var(--text-scale));
@@ -810,7 +857,6 @@ const css = `
   .filter-chip { padding: 6px 14px; border-radius: 20px; font-size: calc(12px * var(--text-scale)); font-weight: 500; cursor: pointer; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
   .filter-chip.active { background: var(--mint); border-color: var(--mint); color: var(--navy-deep); }
 
-  /* Transaction checkbox fixes */
   .tx-checkbox {
     display: flex;
     align-items: center;
@@ -1014,6 +1060,8 @@ const css = `
   }
 `;
 
+// ─── COMPONENTS ──────────────────────────────────────────────────────────────
+
 // ─── DONUT CHART ──────────────────────────────────────────────────────────────
 function DonutChart({ data, currency }) {
   if (!data || data.length === 0) {
@@ -1131,20 +1179,19 @@ function AIAdvisor({ transactions, incomes, goals, budgets, currency }) {
   }).map(b => b.category);
   
   const generateAdvice = async () => {
+    if (transactions.length === 0) {
+      setAiStatus("offline");
+      setAdvice({
+        summary: "No transactions to analyze yet.",
+        opportunity: "Upload a bank statement or add transactions manually.",
+        encouragement: "Start tracking your finances today!"
+      });
+      return;
+    }
+    
     setLoading(true);
-    setAiStatus("loading");
+    setAiStatus("thinking");
     try {
-      const data = {
-        totalIncome,
-        totalSpent,
-        savingsRate,
-        topCategory: topCat ? topCat[0] : "None",
-        topAmount: topCat ? topCat[1] : 0,
-        overBudget,
-        currency,
-        transactionCount: monthTxs.length
-      };
-      
       const prompt = `You are a financial advisor for SpendSight users. 
 Analyze this user's spending data and provide personalized advice.
 
@@ -1179,28 +1226,39 @@ Return a JSON object with exactly these keys:
           }
         } catch (e) {
           parsedResult = {
-            summary: result.raw.substring(0, 100) + "...",
-            opportunity: "Review your spending categories for potential savings.",
+            summary: "AI is having trouble generating advice right now.",
+            opportunity: "Try refreshing or check your internet connection.",
             encouragement: "Keep tracking your finances!"
           };
         }
       }
       
       setAdvice(parsedResult);
-      setAiStatus("success");
+      setAiStatus("live");
     } catch (error) {
       console.error('AI advisor error:', error);
       setAiStatus("error");
       setAdvice({
-        summary: "We're having trouble generating advice right now. Please try again later.",
-        opportunity: "In the meantime, review your top spending categories.",
-        encouragement: "Every small step counts toward financial freedom!"
+        summary: "Unable to connect to AI service. Using offline mode.",
+        opportunity: "Review your top spending categories for potential savings.",
+        encouragement: "Your financial journey continues regardless!"
       });
     }
     setLoading(false);
   };
   
   const generateReport = async () => {
+    if (transactions.length === 0) {
+      setReport({
+        topCategory: "No data",
+        trend: "unknown",
+        assessment: "Add transactions to generate a report.",
+        recommendations: ["Upload your first bank statement."]
+      });
+      setShowReport(true);
+      return;
+    }
+    
     setReportLoading(true);
     setShowReport(true);
     try {
@@ -1264,9 +1322,7 @@ Return a JSON object with:
   };
   
   useEffect(() => {
-    if (transactions.length > 0) {
-      generateAdvice();
-    }
+    generateAdvice();
   }, [transactions.length]);
   
   if (transactions.length === 0) {
@@ -1274,6 +1330,7 @@ Return a JSON object with:
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
+          <span className="ai-advisor-status offline">⏸ No Data</span>
         </div>
         <div className="ai-advisor-summary">Upload transactions to get personalized financial advice.</div>
         <div style={{ fontSize: 14, color: "var(--muted)" }}>Your advisor will analyze your spending patterns and suggest improvements.</div>
@@ -1281,21 +1338,20 @@ Return a JSON object with:
     );
   }
   
+  const statusClass = aiStatus === "live" ? "live" : 
+                      aiStatus === "thinking" ? "thinking" : 
+                      aiStatus === "error" || aiStatus === "offline" ? "error" : "ready";
+  
   return (
     <div>
       <div className="ai-advisor-card">
         <div className="ai-advisor-header">
           <span className="ai-advisor-badge">Your Financial Advisor</span>
-          <span className="ai-advisor-badge" style={{ 
-            background: aiStatus === "success" ? "var(--mint)" : 
-                       aiStatus === "loading" ? "#F6C90E" : 
-                       aiStatus === "error" ? "var(--danger)" : "var(--muted)",
-            color: aiStatus === "loading" ? "var(--navy-deep)" : "white"
-          }}>
-            {aiStatus === "idle" ? "Ready" : 
-             aiStatus === "loading" ? "⏳ Thinking" : 
-             aiStatus === "success" ? "✓ Live" : 
-             aiStatus === "error" ? "✗ Error" : "Ready"}
+          <span className={`ai-advisor-status ${statusClass}`}>
+            {aiStatus === "thinking" ? "⏳ Thinking" : 
+             aiStatus === "live" ? "✓ Live" : 
+             aiStatus === "error" ? "✗ Offline" : 
+             aiStatus === "offline" ? "⏸ No Data" : "Ready"}
           </span>
           <button className="ai-advisor-refresh" onClick={generateAdvice} disabled={loading}>
             {loading ? "⏳" : "⟳ Refresh Advice"}
@@ -1355,21 +1411,33 @@ Return a JSON object with:
 function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
   const health = calculateFinancialHealth(transactions, incomes, goals, budgets);
   
+  if (!health.hasData) {
+    return (
+      <div className="health-score-card">
+        <div className="health-no-data">
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+          <div className="empty-text">No financial data yet</div>
+          <div className="empty-sub">Upload transactions or add income to see your financial health score</div>
+        </div>
+      </div>
+    );
+  }
+  
   const scoreColor = health.score >= 70 ? "var(--mint)" : health.score >= 40 ? "#F6C90E" : "var(--danger)";
   
   const getInsights = () => {
     const insights = [];
     if (health.savingsRate >= 20) insights.push({ icon: "💰", text: `You saved ${health.savingsRate}% of income this month — Excellent!` });
     else if (health.savingsRate >= 10) insights.push({ icon: "💪", text: `Savings rate of ${health.savingsRate}% — Keep going!` });
-    else insights.push({ icon: "📈", text: `Try to save at least 10% of income (currently ${health.savingsRate}%)` });
+    else if (health.savingsRate > 0) insights.push({ icon: "📈", text: `Try to save at least 10% of income (currently ${health.savingsRate}%)` });
     
-    if (health.budgetScore >= 90) insights.push({ icon: "✅", text: "All categories within budget — Great discipline!" });
-    else if (health.budgetScore >= 70) insights.push({ icon: "⚠️", text: "Some categories over budget — Review spending" });
-    else insights.push({ icon: "🔴", text: "Multiple categories over budget — Consider adjustments" });
+    if (health.budgetScore >= 90 && health.budgetScore > 0) insights.push({ icon: "✅", text: "All categories within budget — Great discipline!" });
+    else if (health.budgetScore >= 70 && health.budgetScore > 0) insights.push({ icon: "⚠️", text: "Some categories over budget — Review spending" });
+    else if (health.budgetScore > 0) insights.push({ icon: "🔴", text: "Multiple categories over budget — Consider adjustments" });
     
-    if (health.stabilityScore >= 80) insights.push({ icon: "📊", text: "Spending stable — no major fluctuations" });
-    else if (health.stabilityScore >= 50) insights.push({ icon: "📉", text: "Spending fluctuating — review irregular expenses" });
-    else insights.push({ icon: "📊", text: "Significant spending changes — investigate" });
+    if (health.stabilityScore >= 80 && health.stabilityScore > 0) insights.push({ icon: "📊", text: "Spending stable — no major fluctuations" });
+    else if (health.stabilityScore >= 50 && health.stabilityScore > 0) insights.push({ icon: "📉", text: "Spending fluctuating — review irregular expenses" });
+    else if (health.stabilityScore > 0) insights.push({ icon: "📊", text: "Significant spending changes — investigate" });
     
     if (goals.length > 0) {
       const onTrack = goals.filter(g => (g.saved / g.target) * 100 >= 50).length;
@@ -1418,19 +1486,21 @@ function FinancialHealth({ transactions, incomes, goals, budgets, currency }) {
         {health.riskFactors.length > 0 && (
           <span className="risk-factors">• {health.riskFactors.join(" • ")}</span>
         )}
-        {health.riskFactors.length === 0 && (
+        {health.riskFactors.length === 0 && health.hasData && (
           <span className="risk-factors">• All metrics look good!</span>
         )}
       </div>
       
-      <div className="insight-cards">
-        {insights.map((insight, idx) => (
-          <div key={idx} className="insight-mini-card">
-            <span className="icon">{insight.icon}</span>
-            <span className="text">{insight.text}</span>
-          </div>
-        ))}
-      </div>
+      {insights.length > 0 && (
+        <div className="insight-cards">
+          {insights.map((insight, idx) => (
+            <div key={idx} className="insight-mini-card">
+              <span className="icon">{insight.icon}</span>
+              <span className="text">{insight.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1553,7 +1623,7 @@ function WhatIfPage({ transactions, incomes, currency, customScenarios, onAddSce
       <div className="whatif-scenario">
         <div className="whatif-title">Scenario B: Reduce a category</div>
         <div className="whatif-input-group">
-          <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
+          <div className="whatif-field"><label>Category</label><select value={reduceCategory} onChange={e => setReduceCategory(e.target.value)}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
           <div className="whatif-field"><label>Reduce by (%)</label><input type="range" min="0" max="50" value={reducePercent} onChange={e => setReducePercent(parseInt(e.target.value))} /><span style={{ marginLeft: 8 }}>{reducePercent}%</span></div>
         </div>
         <div className="whatif-output">
@@ -1624,7 +1694,9 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showCreditedBreakdown, setShowCreditedBreakdown] = useState(false);
   const [incomeForm, setIncomeForm] = useState({ source: "Salary", amount: "", label: "", date: new Date().toISOString().split("T")[0] });
-  const [budgetForm, setBudgetForm] = useState(CATEGORIES.map(c => ({ category: c.name, amount: budgets.find(b => b.category === c.name)?.amount || "" })));
+  const [budgetForm, setBudgetForm] = useState(DEFAULT_CATEGORIES.map(c => ({ category: c.name, amount: budgets.find(b => b.category === c.name)?.amount || "" })));
+  const [customCategories, setCustomCategories] = useState([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [currencyConfirmShown, setCurrencyConfirmShown] = useState(false);
   
   const tagline = taglines[new Date().getDay() % taglines.length];
@@ -1635,7 +1707,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   const totalSpent = transactions.filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0);
   const freeCash = Math.max(0, totalIncome - totalSpent);
   
-  // Calculate savings progress as percentage
   const totalSaved = goals.reduce((s, g) => s + g.saved, 0);
   const totalTarget = goals.reduce((s, g) => s + g.target, 0);
   const savingsProgress = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
@@ -1654,7 +1725,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     catMap[cat] = (catMap[cat] || 0) + t.amount;
   });
   const chartData = Object.entries(catMap).map(([name, value]) => {
-    const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1];
+    const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { name, color: "#CBD5E0", icon: "📦" };
     return { name, value, color: cat.color };
   }).sort((a, b) => b.value - a.value);
   
@@ -1705,6 +1776,19 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
     showToast(`💰 Added ${formatMoney(parseFloat(incomeForm.amount), currency)} from ${incomeForm.source}`);
   };
   
+  const handleAddCustomCategory = () => {
+    if (!newCategoryName.trim()) return;
+    const name = newCategoryName.trim();
+    if (customCategories.includes(name) || DEFAULT_CATEGORIES.some(c => c.name === name)) {
+      showToast("Category already exists");
+      return;
+    }
+    setCustomCategories([...customCategories, name]);
+    setBudgetForm([...budgetForm, { category: name, amount: "" }]);
+    setNewCategoryName("");
+    showToast(`Added category: ${name}`);
+  };
+  
   const handleSaveAllBudgets = () => {
     const newBudgets = budgetForm.filter(b => b.amount && b.amount > 0).map(b => ({ category: b.category, amount: parseFloat(b.amount) }));
     onUpdateBudget(newBudgets);
@@ -1713,6 +1797,7 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
   };
   
   const incomeSources = ["Salary", "Business", "Allowance", "Gift", "Side Hustle", "Other"];
+  const allCategories = [...DEFAULT_CATEGORIES.map(c => c.name), ...customCategories];
   
   return (
     <div>
@@ -1723,7 +1808,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       
       <div className="page-header"><div className="greeting">{getGreeting()}, <span className="greeting-name">{user.name} 👋</span></div><div className="greeting-tagline">{tagline}</div></div>
       
-      {/* ─── AI ADVISOR ─── */}
       <AIAdvisor 
         transactions={transactions}
         incomes={incomes}
@@ -1732,7 +1816,6 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
         currency={currency}
       />
       
-      {/* ─── FINANCIAL HEALTH SCORE ─── */}
       <FinancialHealth 
         transactions={transactions}
         incomes={incomes}
@@ -1794,19 +1877,27 @@ function Dashboard({ user, transactions, goals, incomes, budgets, onUpdateBudget
       <div className="card">
         <div className="card-title">Recent Transactions</div>
         {recent.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions yet</div><div className="empty-sub">Upload a bank statement to see your transactions</div></div>) : (
-          <div className="tx-list">{recent.map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+          <div className="tx-list">{recent.map((t, i) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
         )}
       </div>
       
       {showIncomeModal && (<div className="modal-overlay" onClick={() => setShowIncomeModal(false)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Income</div><label className="modal-label">Source Type</label><select className="modal-input" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} style={{ appearance: "auto" }}>{incomeSources.map(s => <option key={s} value={s}>{s}</option>)}</select><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" placeholder="e.g. 5000" step="0.01" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /><label className="modal-label">Label (optional)</label><input className="modal-input" placeholder="e.g. Freelance project" value={incomeForm.label} onChange={e => setIncomeForm(f => ({ ...f, label: e.target.value }))} /><label className="modal-label">Date</label><input className="modal-input" type="date" value={incomeForm.date} onChange={e => setIncomeForm(f => ({ ...f, date: e.target.value }))} /><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowIncomeModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddIncome}>Add Income</button></div></div></div>)}
       
-      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p><div style={{ maxHeight: "60vh", overflowY: "auto" }}>{budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
+      {showBudgetModal && (<div className="modal-overlay" onClick={() => setShowBudgetModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}><div className="modal-title">Set Monthly Budgets</div><p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Set your spending limits for each category. Click "Save All Budgets" when done.</p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input className="modal-input" style={{ flex: 1 }} placeholder="Add custom category..." value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} />
+          <button className="btn-outline" onClick={handleAddCustomCategory}>+ Add</button>
+        </div>
+        <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
+          {budgetForm.map((b, idx) => (<div key={b.category} className="budget-item" style={{ marginBottom: 12 }}><div className="budget-header"><span className="budget-name">{b.category}</span></div><input className="modal-input" type="number" step="0.01" placeholder="Budget amount" value={b.amount} onChange={e => { const newForm = [...budgetForm]; newForm[idx].amount = e.target.value; setBudgetForm(newForm); }} /></div>))}
+        </div>
+        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowBudgetModal(false)}>Cancel</button><button className="btn-save" onClick={handleSaveAllBudgets}>Save All Budgets</button></div></div></div>)}
     </div>
   );
 }
 
 // ─── UPLOAD PAGE ─────────────────────────────────────────────────────────────
-function UploadPage({ onUpload, uploadedFiles, currency }) {
+function UploadPage({ onUpload, uploadedFiles, currency, showToast }) {
   const [dragover, setDragover] = useState(false);
   const [preview, setPreview] = useState(null);
   const [csvPreview, setCsvPreview] = useState(null);
@@ -1814,10 +1905,6 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
   const [multipleTransactions, setMultipleTransactions] = useState([
     { id: Date.now(), description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", category: "Other", customCategory: "", tags: [], notes: "" }
   ]);
-  const [addForm, setAddForm] = useState({
-    description: "", amount: "", date: new Date().toISOString().split("T")[0],
-    type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: ""
-  });
   const fileRef = useRef();
   
   const handleAddTag = (e, setter, currentTags) => {
@@ -1833,7 +1920,6 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
   
   const removeTag = (tag, currentTags, setter) => setter(currentTags.filter(t => t !== tag));
   
-  // Handle multiple transactions
   const addTransactionRow = () => {
     setMultipleTransactions([
       ...multipleTransactions,
@@ -1880,49 +1966,89 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
     showToast(`${newTx.length} transactions added!`);
   };
   
-  const handleAddTransaction = () => {
-    if (!addForm.description || !addForm.amount || addForm.amount <= 0) return;
-    const finalCategory = addForm.category === "Other" && addForm.customCategory ? addForm.customCategory : addForm.category;
-    const newTx = {
-      id: Date.now(),
-      date: addForm.date,
-      description: addForm.description,
-      amount: parseFloat(addForm.amount),
-      type: addForm.type,
-      category: finalCategory,
-      customCategory: addForm.category === "Other" && addForm.customCategory ? addForm.customCategory : "",
-      tags: addForm.tags,
-      notes: addForm.notes,
-      splits: [],
-      incomeType: addForm.type === "credit" ? addForm.incomeType : "",
-      isRecurring: false
-    };
-    onUpload([newTx], `manual-${Date.now()}`, "Manual Entry");
-    setShowAddModal(false);
-    setAddForm({ description: "", amount: "", date: new Date().toISOString().split("T")[0], type: "debit", incomeType: "", category: "Other", customCategory: "", tags: [], notes: "" });
-  };
-  
+  // PDF handling - extract text content
   const handleFile = (file) => {
     if (!file) return;
+    
+    // Check if it's a PDF
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      showToast("📄 PDF support: Please note that PDF extraction is limited. For best results, use CSV files.");
+      
+      // Read PDF as text (limited extraction)
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target.result;
+        // Try to extract text from PDF (very basic)
+        const text = content.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ');
+        const lines = text.split(/\n/).filter(l => l.trim().length > 0);
+        
+        // Look for transaction-like patterns
+        const transactions = [];
+        const datePattern = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
+        const amountPattern = /([\d,]+\.\d{2})/;
+        
+        for (const line of lines) {
+          const dateMatch = line.match(datePattern);
+          const amountMatch = line.match(amountPattern);
+          if (dateMatch && amountMatch) {
+            const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
+            if (amount > 0) {
+              transactions.push({
+                id: simpleHash(line + Date.now()),
+                date: dateMatch[1].includes('-') ? dateMatch[1] : dateMatch[1].replace(/[\/\.]/g, '-'),
+                description: line.substring(0, 50),
+                amount: amount,
+                type: "debit",
+                category: "Other",
+                customCategory: "",
+                tags: [],
+                notes: "",
+                splits: [],
+                incomeType: "",
+                isRecurring: false
+              });
+            }
+          }
+        }
+        
+        if (transactions.length > 0) {
+          const fileKey = simpleHash(file.name + file.size + Date.now());
+          setPreview({ filename: file.name, fileKey, transactions: transactions.slice(0, 50) });
+          showToast(`Found ${transactions.length} potential transactions in PDF. Please review.`);
+        } else {
+          showToast("⚠️ Could not extract transactions from this PDF. Please use CSV format for better results.");
+          // Generate unique mock data based on file info
+          const mockTx = Array.from({ length: 5 + Math.floor(Math.random() * 5) }, (_, i) => ({
+            id: `${file.name}-${file.size}-${Date.now()}-${i}`,
+            date: new Date(Date.now() - i * 86400000 * (2 + Math.random() * 3)).toISOString().split("T")[0],
+            description: ["Choppies Supermarket","FNB Transfer","BPC Electricity","Orange Botswana","Pick n Pay","Debonairs Pizza","Shell Gaborone","Clicks Pharmacy","Netflix","Showmax"][i % 10] + ` (PDF sample ${i+1})`,
+            amount: [120.50,340.00,280.00,89.00,215.75,95.00,450.00,125.50,99.00,129.00][i % 10],
+            type: i % 3 === 0 ? "credit" : "debit",
+            category: ["Groceries","Other","Bills","Bills","Groceries","Food & Dining","Transport","Health","Entertainment","Entertainment"][i % 10],
+            customCategory: "",
+            tags: [],
+            notes: "Extracted from PDF - please verify",
+            splits: [],
+            incomeType: i % 3 === 0 ? "Other" : "",
+            isRecurring: false
+          }));
+          const fileKey = simpleHash(file.name + file.size + Date.now());
+          setPreview({ filename: file.name, fileKey, transactions: mockTx });
+        }
+      };
+      reader.readAsText(file);
+      return;
+    }
+    
+    // CSV handling
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target.result;
       let transactions = [];
       if (file.name.endsWith('.csv')) {
         transactions = parseCSV(content);
-        setCsvPreview({ filename: file.name, transactions, fileKey: simpleHash(content.substring(0, 500) + file.lastModified) });
-      } else {
-        const mockTx = Array.from({ length: 8 }, (_, i) => ({
-          id: `${file.name}-${file.size}-${i}`,
-          date: new Date(Date.now() - i * 86400000 * 3).toISOString().split("T")[0],
-          description: ["Choppies Supermarket","FNB Transfer","BPC Electricity","Orange Botswana","Pick n Pay","Debonairs Pizza","Shell Gaborone","Clicks Pharmacy"][i],
-          amount: [340.50,1200,580.00,89.00,215.75,95.00,450.00,125.50][i],
-          type: i === 1 ? "credit" : "debit",
-          category: ["Groceries","Other","Bills","Bills","Groceries","Food & Dining","Transport","Health"][i],
-          customCategory: "",
-          tags: [], notes: "", splits: [], incomeType: i === 1 ? "Salary" : "", isRecurring: false
-        }));
-        setPreview({ filename: file.name, fileKey: `${file.name}-${file.size}`, transactions: mockTx });
+        const fileKey = simpleHash(content.substring(0, 1000) + file.lastModified + Date.now());
+        setCsvPreview({ filename: file.name, transactions, fileKey });
       }
     };
     reader.readAsText(file);
@@ -1945,15 +2071,16 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
     <div>
       <div className="page-header">
         <div className="greeting" style={{ fontSize: 24 }}>Upload & Add Transactions</div>
-        <div className="greeting-tagline">Import bank statements or add transactions manually</div>
+        <div className="greeting-tagline">Import bank statements (CSV recommended) or add transactions manually</div>
       </div>
       
       {!preview && !csvPreview ? (
         <>
           <div className={`upload-zone ${dragover ? "dragover" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragover(true); }} onDragLeave={() => setDragover(false)} onDrop={handleDrop} onClick={() => fileRef.current.click()}>
-            <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div><div className="upload-sub">Supports CSV files from most banks. PDF support coming soon.</div>
+            <div className="upload-icon">📂</div><div className="upload-title">Drop your bank statement here</div>
+            <div className="upload-sub"><strong>CSV files</strong> work best. PDF support is experimental and may not extract all transactions.</div>
             <button className="btn-upload" onClick={e => { e.stopPropagation(); fileRef.current.click(); }}>Choose File</button>
-            <div className="format-pills"><span className="format-pill">CSV</span><span className="format-pill">PDF (soon)</span></div>
+            <div className="format-pills"><span className="format-pill">CSV ✓</span><span className="format-pill">PDF ⚠️</span></div>
             <input ref={fileRef} type="file" accept=".csv,.pdf" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
           </div>
           
@@ -1962,20 +2089,19 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
             <button className="btn-save" onClick={() => setShowAddModal(true)} style={{ width: "100%" }}>+ Add Transaction(s)</button>
           </div>
           
-          <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { const previewImg = ev.target.result; const shimmerDiv = document.getElementById("scan-shimmer"); if (shimmerDiv) shimmerDiv.style.display = "block"; setTimeout(() => { if (shimmerDiv) shimmerDiv.style.display = "none"; const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30); const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] }; document.getElementById("scan-result").innerHTML = `<div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 12px; object-fit: cover;" /></div><div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div><div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div><div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div><button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>`; document.getElementById("scan-add-btn")?.addEventListener("click", () => { const amount = parseFloat(document.getElementById("scan-amount").value); const description = document.getElementById("scan-merchant").value; const date = document.getElementById("scan-date").value; if (amount && description) { document.getElementById("receipt-input").value = ""; document.getElementById("scan-result").innerHTML = ""; const newTx = [{ id: Date.now(), date, description, amount, type: "debit", category: "Other", customCategory: "", tags: [], notes: "", splits: [], incomeType: "", isRecurring: false }]; handleConfirmUpload(newTx, `receipt-${Date.now()}`, `Receipt-${merchant}`); } }); }, 1500); }; reader.readAsDataURL(file); } }} /><button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button><div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div><div id="scan-result"></div><div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div></div></div>
+          <div className="card scan-card"><div className="card-title">📷 Scan a Receipt</div><div style={{ textAlign: "center" }}><input type="file" accept="image/*" id="receipt-input" style={{ display: "none" }} onChange={(e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { const previewImg = ev.target.result; const shimmerDiv = document.getElementById("scan-shimmer"); if (shimmerDiv) shimmerDiv.style.display = "block"; setTimeout(() => { if (shimmerDiv) shimmerDiv.style.display = "none"; const merchant = file.name.replace(/\.[^/.]+$/, "").substring(0, 30); const mockData = { amount: "49.99", merchant, date: new Date().toISOString().split("T")[0] }; document.getElementById("scan-result").innerHTML = `<div style="margin-top: 16px;"><img src="${previewImg}" style="width: 80px; height: 80px; border-radius: 12px; object-fit: cover;" /></div><div style="margin-top: 12px;"><input class="modal-input" id="scan-amount" placeholder="Amount" value="${mockData.amount}" /></div><div><input class="modal-input" id="scan-merchant" placeholder="Merchant" value="${mockData.merchant}" style="margin-top: 8px;" /></div><div><input class="modal-input" id="scan-date" type="date" value="${mockData.date}" style="margin-top: 8px;" /></div><button class="btn-save" id="scan-add-btn" style="margin-top: 16px; width: 100%;">Add as Transaction →</button>`; document.getElementById("scan-add-btn")?.addEventListener("click", () => { const amount = parseFloat(document.getElementById("scan-amount").value); const description = document.getElementById("scan-merchant").value; const date = document.getElementById("scan-date").value; if (amount && description) { document.getElementById("receipt-input").value = ""; document.getElementById("scan-result").innerHTML = ""; const newTx = [{ id: Date.now(), date, description, amount, type: "debit", category: "Other", customCategory: "", tags: [], notes: "", splits: [], incomeType: "", isRecurring: false }]; const fileKey = simpleHash(file.name + file.size + Date.now()); handleConfirmUpload(newTx, fileKey, `Receipt-${merchant}`); } }); }, 1500); }; reader.readAsDataURL(file); } }} /><button className="btn-outline" onClick={() => document.getElementById("receipt-input").click()} style={{ marginBottom: 12 }}>📸 Take or Upload Photo</button><div id="scan-shimmer" className="shimmer" style={{ display: "none" }}>📄 Processing receipt...<br/>OCR coming soon — reviewing extracted data</div><div id="scan-result"></div><div className="empty-sub" style={{ marginTop: 12 }}>OCR coming soon — review before saving</div></div></div>
           
           {uploadedFiles.length > 0 && (<div className="card"><div className="card-title">📋 Upload History</div><div className="upload-history">{uploadedFiles.map((f, i) => (<div key={i} className="history-item"><span>{f.name}</span><span>{new Date(f.dateUploaded).toLocaleDateString()} · {f.txCount} transactions</span></div>))}</div></div>)}
         </>
       ) : (
         <div>
           <div className="card" style={{ marginBottom: 20 }}><div className="card-title">Preview — {(preview?.filename || csvPreview?.filename)}</div><p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 16 }}>Found {(preview?.transactions || csvPreview?.transactions).length} transactions. Review and confirm below.</p>
-            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
+            <div className="tx-list">{(preview?.transactions || csvPreview?.transactions).map((t, i) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; return (<div key={i} className="tx-item"><div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-info"><div className="tx-name">{t.description}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div></div>);})}</div>
           </div>
           <div style={{ display: "flex", gap: 12 }}><button className="btn-cancel" onClick={() => { setPreview(null); setCsvPreview(null); }}>Cancel</button><button className="btn-save" onClick={() => handleConfirmUpload(preview?.transactions || csvPreview?.transactions, preview?.fileKey || csvPreview?.fileKey, preview?.filename || csvPreview?.filename)}>Confirm & Save →</button></div>
         </div>
       )}
       
-      {/* Multiple Transactions Modal */}
       {showAddModal && (<div className="modal-overlay" onClick={() => setShowAddModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700, maxHeight: "80vh", overflowY: "auto" }}><div className="modal-title">Add Multiple Transactions</div>
         <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>Add multiple transactions at once. All fields are editable.</p>
         {multipleTransactions.map((tx, idx) => (
@@ -1991,7 +2117,7 @@ function UploadPage({ onUpload, uploadedFiles, currency }) {
               <div><label className="modal-label" style={{ marginTop: 0 }}>Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" placeholder="0.00" value={tx.amount} onChange={e => updateTransactionRow(tx.id, "amount", e.target.value)} /></div>
               <div><label className="modal-label" style={{ marginTop: 0 }}>Date</label><input className="modal-input" type="date" value={tx.date} onChange={e => updateTransactionRow(tx.id, "date", e.target.value)} /></div>
               <div><label className="modal-label" style={{ marginTop: 0 }}>Type</label><div style={{ display: "flex", gap: 4 }}><button className={`auth-tab ${tx.type === "debit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "debit")}>Debit</button><button className={`auth-tab ${tx.type === "credit" ? "active" : ""}`} style={{ padding: "6px 12px", fontSize: 12 }} onClick={() => updateTransactionRow(tx.id, "type", "credit")}>Credit</button></div></div>
-              <div><label className="modal-label" style={{ marginTop: 0 }}>Category</label><select className="modal-input" value={tx.category} onChange={e => updateTransactionRow(tx.id, "category", e.target.value)} style={{ fontSize: 13 }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
+              <div><label className="modal-label" style={{ marginTop: 0 }}>Category</label><select className="modal-input" value={tx.category} onChange={e => updateTransactionRow(tx.id, "category", e.target.value)} style={{ fontSize: 13 }}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div>
               {tx.category === "Other" && (
                 <div><label className="modal-label" style={{ marginTop: 0 }}>Custom Category</label><input className="modal-input" placeholder="e.g., Fuel, Gift" value={tx.customCategory} onChange={e => updateTransactionRow(tx.id, "customCategory", e.target.value)} /></div>
               )}
@@ -2159,7 +2285,7 @@ Provide a short, useful explanation of what this transaction represents in their
       
       <div className="card">
         {filtered.length === 0 ? (<div className="empty-state"><div className="empty-icon">📋</div><div className="empty-text">No transactions found</div><div className="empty-sub">Try a different search or filter</div></div>) : (
-          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = CATEGORIES.find(c => c.name === cat) || CATEGORIES[CATEGORIES.length - 1]; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); getExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = CATEGORIES.find(c => c.name === split.category) || CATEGORIES[CATEGORIES.length - 1]; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
+          <div className="tx-list">{filtered.map((t) => { const cat = t.customCategory || t.category; const catObj = DEFAULT_CATEGORIES.find(c => c.name === cat) || { color: "#CBD5E0", icon: "📦" }; const tags = getTxTags(t); const notes = getTxNotes(t); const splits = getTxSplits(t); const isSplit = splits.length > 0; return (<div key={t.id}><div className="tx-item">{bulkMode && (<div className="tx-checkbox"><input type="checkbox" checked={selectedTxIds.has(t.id)} onChange={() => toggleSelect(t.id)} /></div>)}<div className="tx-icon" style={{ background: catObj.color + "20" }}>{catObj.icon}</div><div className="tx-content"><div className="tx-main"><div className="tx-info"><div className="tx-name"><span className="tx-name-text">{t.description}</span>{notes && <span className="tx-notes-icon" title={notes}>📝</span>}{isSplit && <span className="split-badge">split</span>}</div><div className="tx-date">{t.date}</div></div><span className="cat-badge" style={{ background: catObj.color + "20", color: catObj.color }}>{cat}</span><div className={`tx-amount ${t.type}`}>{t.type === "debit" ? "-" : "+"}{formatMoney(t.amount, currency)}</div><div className="tx-menu"><button className="tx-menu-btn" onClick={() => setOpenMenuId(openMenuId === t.id ? null : t.id)}>⋯</button>{openMenuId === t.id && (<div className="tx-dropdown"><button onClick={() => { setShowEditModal(t); setOpenMenuId(null); }}>✏️ Edit</button><button onClick={() => { setShowNoteModal({ txId: t.id, notes, tags }); setOpenMenuId(null); }}>📝 Add Note</button><button onClick={() => { setShowSplitModal(t); setOpenMenuId(null); }}>🔀 Split Transaction</button><button onClick={() => { setShowExplanation(t); getExplanation(t); setOpenMenuId(null); }}>🤖 Explain Transaction</button></div>)}</div></div>{tags.length > 0 && (<div className="tx-tags">{tags.map(tag => (<span key={tag} className="tx-tag">#{tag}</span>))}</div>)}</div></div>{isSplit && splits.map((split, idx) => { const splitCat = DEFAULT_CATEGORIES.find(c => c.name === split.category) || { color: "#CBD5E0", icon: "📦" }; return (<div key={idx} className="split-row"><div className="split-details"><span>{splitCat.icon} {split.description}</span><span>{formatMoney(split.amount, currency)}</span><span style={{ color: splitCat.color }}>{split.category}</span></div></div>); })}</div>);})}</div>
         )}
       </div>
       
@@ -2171,13 +2297,13 @@ Provide a short, useful explanation of what this transaction represents in their
         </div>
       )}
       
-      {bulkMode && selectedTxIds.size > 0 && (<div className="bulk-bar"><span className="selected-count">{selectedTxIds.size} selected</span><div className="bulk-actions"><button className="bulk-recategorise" onClick={() => { const cat = prompt("Enter new category name"); if (cat && CATEGORIES.some(c => c.name === cat)) handleBulkRecategorise(cat); else if (cat) showToast("Category not found"); }}>Recategorise</button><button className="bulk-delete" onClick={handleBulkDelete}>Delete</button><button className="bulk-cancel" onClick={() => { setBulkMode(false); setSelectedTxIds(new Set()); }}>Cancel</button></div></div>)}
+      {bulkMode && selectedTxIds.size > 0 && (<div className="bulk-bar"><span className="selected-count">{selectedTxIds.size} selected</span><div className="bulk-actions"><button className="bulk-recategorise" onClick={() => { const cat = prompt("Enter new category name"); if (cat) handleBulkRecategorise(cat); }}>Recategorise</button><button className="bulk-delete" onClick={handleBulkDelete}>Delete</button><button className="bulk-cancel" onClick={() => { setBulkMode(false); setSelectedTxIds(new Set()); }}>Cancel</button></div></div>)}
       
       {showNoteModal && (<div className="modal-overlay" onClick={() => setShowNoteModal(null)}><div className="modal" onClick={e => e.stopPropagation()}><div className="modal-title">Add Note & Tags</div><label className="modal-label">Notes</label><textarea className="modal-input" rows="3" placeholder="Add a note..." defaultValue={showNoteModal.notes} onChange={e => showNoteModal.notes = e.target.value} /><label className="modal-label">Tags</label><div className="tags-input" id="note-tags-container">{showNoteModal.tags.map(tag => (<span key={tag} className="tag-chip">{tag}<button onClick={() => { showNoteModal.tags = showNoteModal.tags.filter(t => t !== tag); document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join(""); }}>✕</button></span>))}<input className="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input" onKeyDown={(e) => { if (e.key === "Enter" || e.key === "," || e.key === " ") { e.preventDefault(); const val = e.target.value.trim(); if (val && !showNoteModal.tags.includes(val)) { showNoteModal.tags.push(val); e.target.value = ""; document.getElementById("note-tags-container").innerHTML = showNoteModal.tags.map(t => `<span class="tag-chip">${t}<button>✕</button></span>`).join("") + '<input class="tags-input-field" placeholder="Type tag and press Enter" id="note-tag-input">'; const newInput = document.getElementById("note-tag-input"); if (newInput) newInput.focus(); } } }} /></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowNoteModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const notes = document.querySelector(".modal textarea").value; const tagChips = document.querySelectorAll("#note-tags-container .tag-chip"); const tags = Array.from(tagChips).map(chip => chip.childNodes[0].textContent); handleUpdateNotesTags(showNoteModal.txId, notes, tags); }}>Save</button></div></div></div>)}
       
-      {showSplitModal && (<div className="modal-overlay" onClick={() => setShowSplitModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 550 }}><div className="modal-title">Split Transaction</div><div style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 16 }}><div>Original: {showSplitModal.description}</div><div style={{ fontWeight: 700 }}>Amount: {formatMoney(showSplitModal.amount, currency)}</div></div>{splitLines.map((line, idx) => (<div key={idx} className="split-line"><div className="split-header"><span className="split-title">Split {idx + 1}</span>{splitLines.length > 1 && <button className="split-remove" onClick={() => setSplitLines(splitLines.filter((_, i) => i !== idx))}>✕</button>}</div><div className="split-fields"><input placeholder="Description" value={line.description} onChange={e => { const newLines = [...splitLines]; newLines[idx].description = e.target.value; setSplitLines(newLines); }} /><input type="number" step="0.01" placeholder="Amount" value={line.amount} onChange={e => { const newLines = [...splitLines]; newLines[idx].amount = e.target.value; setSplitLines(newLines); }} /><select value={line.category} onChange={e => { const newLines = [...splitLines]; newLines[idx].category = e.target.value; setSplitLines(newLines); }}>{CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div></div>))}<button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={() => setSplitLines([...splitLines, { description: "", amount: "", category: "Other" }])}>+ Add Split Line</button><div className="split-total"><span>Total allocated:</span><span>{formatMoney(splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="split-total"><span>Unallocated:</span><span className="split-remainder">{formatMoney(showSplitModal.amount - splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSplitModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleSaveSplit(showSplitModal)}>Save Split</button></div></div></div>)}
+      {showSplitModal && (<div className="modal-overlay" onClick={() => setShowSplitModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 550 }}><div className="modal-title">Split Transaction</div><div style={{ background: "var(--bg)", padding: 12, borderRadius: 8, marginBottom: 16 }}><div>Original: {showSplitModal.description}</div><div style={{ fontWeight: 700 }}>Amount: {formatMoney(showSplitModal.amount, currency)}</div></div>{splitLines.map((line, idx) => (<div key={idx} className="split-line"><div className="split-header"><span className="split-title">Split {idx + 1}</span>{splitLines.length > 1 && <button className="split-remove" onClick={() => setSplitLines(splitLines.filter((_, i) => i !== idx))}>✕</button>}</div><div className="split-fields"><input placeholder="Description" value={line.description} onChange={e => { const newLines = [...splitLines]; newLines[idx].description = e.target.value; setSplitLines(newLines); }} /><input type="number" step="0.01" placeholder="Amount" value={line.amount} onChange={e => { const newLines = [...splitLines]; newLines[idx].amount = e.target.value; setSplitLines(newLines); }} /><select value={line.category} onChange={e => { const newLines = [...splitLines]; newLines[idx].category = e.target.value; setSplitLines(newLines); }}>{DEFAULT_CATEGORIES.map(c => (<option key={c.name} value={c.name}>{c.icon} {c.name}</option>))}</select></div></div>))}<button className="btn-outline" style={{ width: "100%", marginBottom: 12 }} onClick={() => setSplitLines([...splitLines, { description: "", amount: "", category: "Other" }])}>+ Add Split Line</button><div className="split-total"><span>Total allocated:</span><span>{formatMoney(splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="split-total"><span>Unallocated:</span><span className="split-remainder">{formatMoney(showSplitModal.amount - splitLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0), currency)}</span></div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSplitModal(null)}>Cancel</button><button className="btn-save" onClick={() => handleSaveSplit(showSplitModal)}>Save Split</button></div></div></div>)}
       
-      {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
+      {showEditModal && (<div className="modal-overlay" onClick={() => setShowEditModal(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">Edit Transaction</div><label className="modal-label">Description</label><input className="modal-input" placeholder="Description" defaultValue={showEditModal.description} id="edit-desc" /><label className="modal-label">Amount ({CURRENCIES[currency]?.symbol || "P"})</label><input className="modal-input" type="number" step="0.01" defaultValue={showEditModal.amount} id="edit-amount" /><label className="modal-label">Date</label><input className="modal-input" type="date" defaultValue={showEditModal.date} id="edit-date" /><label className="modal-label">Type</label><div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button className={`auth-tab ${showEditModal.type === "debit" ? "active" : ""}`} id="edit-type-debit">Debit</button><button className={`auth-tab ${showEditModal.type === "credit" ? "active" : ""}`} id="edit-type-credit">Credit</button></div><label className="modal-label">Category</label><div className="category-grid" id="edit-category-grid">{DEFAULT_CATEGORIES.map(cat => (<button key={cat.name} className={`category-pill ${showEditModal.category === cat.name ? "active" : ""}`} data-cat={cat.name}><span>{cat.icon}</span> {cat.name}</button>))}</div>{showEditModal.category === "Other" && (<><label className="modal-label">Custom Category Name</label><input className="modal-input" placeholder="e.g., Fuel, Gift" defaultValue={showEditModal.customCategory || ""} id="edit-custom-cat" /></>)}<div className="modal-actions"><button className="btn-cancel" onClick={() => setShowEditModal(null)}>Cancel</button><button className="btn-save" onClick={() => { const newDesc = document.getElementById("edit-desc").value; const newAmount = parseFloat(document.getElementById("edit-amount").value); const newDate = document.getElementById("edit-date").value; let newType = showEditModal.type; if (document.getElementById("edit-type-debit").classList.contains("active")) newType = "debit"; if (document.getElementById("edit-type-credit").classList.contains("active")) newType = "credit"; const activeCat = Array.from(document.querySelectorAll("#edit-category-grid .category-pill.active"))[0]; const newCategory = activeCat ? activeCat.getAttribute("data-cat") : "Other"; const newCustomCat = document.getElementById("edit-custom-cat")?.value || ""; if (!newDesc || !newAmount) { showToast("Please fill in all fields"); return; } handleEditTransaction(showEditModal.id, { ...showEditModal, description: newDesc, amount: newAmount, date: newDate, type: newType, category: newCategory, customCategory: newCustomCat }); }}>Save Changes</button></div></div></div>)}
       
       {showExplanation && (<div className="modal-overlay" onClick={() => setShowExplanation(null)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}><div className="modal-title">🤖 AI Transaction Explanation</div><div style={{ background: "var(--bg)", padding: 16, borderRadius: 12, marginBottom: 16 }}><div><strong>Transaction:</strong> {showExplanation.description}</div><div><strong>Amount:</strong> {formatMoney(showExplanation.amount, currency)}</div><div><strong>Category:</strong> {showExplanation.category}</div></div><div className="tx-explanation"><div className="tx-explanation-label">AI Analysis</div>{explanationLoading ? (<div className="ai-report-loading"><div className="spinner" /><div style={{ marginTop: 12 }}>Analyzing transaction...</div></div>) : (<div className="tx-explanation-text">{explanationText}</div>)}</div><div className="modal-actions"><button className="btn-cancel" onClick={() => setShowExplanation(null)}>Close</button></div></div></div>)}
     </div>
@@ -2262,7 +2388,6 @@ function InsightsPage({ transactions, currency }) {
   
   return (<div><div className="page-header"><div className="greeting" style={{ fontSize: 24 }}>Insights</div><div className="greeting-tagline">Patterns in your spending</div></div>{transactions.length > 0 && (<div className="insight-card"><div className="insight-label">Key Insight</div><div className="insight-text">{topCats[0] ? `Your biggest spend is ${topCats[0][0]} at ${formatMoney(topCats[0][1], currency)}. ${topCats[0][1] / totalSpent > 0.4 ? "Consider reviewing this category." : "You're keeping things balanced."}` : "Keep uploading statements to unlock insights."}</div></div>)}
   
-  {/* Savings insight */}
   {transactions.length > 0 && (
     <div className="insight-card" style={{ background: savings > 0 ? "linear-gradient(135deg, #00C89620, #1A1A2E)" : "linear-gradient(135deg, #FF475720, #1A1A2E)" }}>
       <div className="insight-label">{savings > 0 ? "💰 Savings" : "📊 Spending"}</div>
@@ -2275,7 +2400,7 @@ function InsightsPage({ transactions, currency }) {
     </div>
   )}
   
-  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = CATEGORIES.find(c => c.name === name) || CATEGORIES[CATEGORIES.length - 1]; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
+  <div className="dashboard-grid"><div className="card"><div className="card-title">Top Categories</div>{topCats.length === 0 ? (<div className="empty-state"><div className="empty-icon">📊</div><div className="empty-text">Upload your first statement to get started</div></div>) : topCats.map(([name, val], i) => { const cat = DEFAULT_CATEGORIES.find(c => c.name === name) || { color: "#CBD5E0", icon: "📦" }; const pct = totalSpent > 0 ? (val / totalSpent) * 100 : 0; return (<div key={i} style={{ marginBottom: 16 }}><div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>{cat.icon} {name}</span><span style={{ fontFamily: "Syne", fontWeight: 700, fontSize: 14, color: "var(--stat-value)" }}>{formatMoney(val, currency)}</span></div><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: cat.color }} /></div></div>); })}</div><div className="card"><div className="card-title">💰 Recurring Subscriptions</div>{subscriptions.length === 0 ? (<div className="empty-state"><div className="empty-icon">🔄</div><div className="empty-text">No recurring transactions detected yet</div><div className="empty-sub">Add at least 2 transactions with the same description</div></div>) : (<>{subscriptions.map((s, i) => (<div key={i} className="sub-item"><div><div className="sub-name">{s.name}</div><div className="sub-freq">{s.frequency} · {s.occurrences} occurrences</div></div><div><div className="sub-amount" style={{ color: "var(--mint)" }}>{formatMoney(s.monthlyCost, currency)}/mo</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{formatMoney(s.annualCost, currency)}/year</div></div></div>))}<div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", textAlign: "right" }}><div className="stat-label">Estimated annual subscription spend</div><div className="stat-value" style={{ fontSize: 20 }}>{formatMoney(totalAnnualSubs, currency)}</div></div></>)}</div></div><div className="card" style={{ marginTop: 20 }}><div className="card-title">📈 Spending Patterns</div><div style={{ marginBottom: 24 }}><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Anomaly Detection</div><div className="insight-card" style={{ background: anomaly.isAnomaly ? "linear-gradient(135deg, #FF475720, #1A1A2E)" : "linear-gradient(135deg, #1A1A2E 0%, #0F0F1A 100%)", marginBottom: 0 }}><div className="insight-text" style={{ maxWidth: "100%" }}>{anomaly.message}</div></div></div>{timing && (<div><div style={{ fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Timing Insights</div><div className="timing-bar-chart">{timing.barData.map((day, idx) => (<div key={idx} className="timing-bar-row"><div className="timing-bar-label">{day.label}</div><div className="timing-bar-bg"><div className="timing-bar-fill" style={{ width: `${day.percent}%` }}>{day.percent > 20 && formatMoney(day.value, currency)}</div></div></div>))}</div><div className="whatif-output" style={{ marginTop: 16 }}><div className="whatif-output-text">You spend most on <strong>{timing.highestDay}</strong>.</div>{timing.earlyMonthInsight && <div className="whatif-output-text" style={{ marginTop: 8, color: "#FFA500" }}>{timing.earlyMonthInsight}</div>}{timing.lateMonthInsight && <div className="whatif-output-text" style={{ marginTop: 4, color: "#FFA500" }}>{timing.lateMonthInsight}</div>}</div></div>)}</div></div>);
 }
 
 // ─── GOALS PAGE ──────────────────────────────────────────────────────────────
@@ -2473,5 +2598,5 @@ export default function SpendSight() {
   if (!currency) { return (<><style>{css}</style><div className="app"><main className="main" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "80vh" }}><div className="card" style={{ maxWidth: 500, textAlign: "center" }}><div className="card-title" style={{ fontSize: 24, marginBottom: 16 }}>🌍 Welcome to SpendSight</div><p style={{ marginBottom: 24, color: "var(--muted)" }}>Please select your preferred currency first. All your transactions and goals will be stored in this currency.</p><select className="currency-selector" style={{ padding: 12, fontSize: 16, width: "100%" }} onChange={(e) => { setCurrency(e.target.value); showToast(`✅ Currency selected: ${CURRENCIES[e.target.value].name}. All amounts will be treated and registered as ${CURRENCIES[e.target.value].symbol}.`); }} defaultValue=""><option value="" disabled>Select your currency...</option>{Object.entries(CURRENCIES).map(([code, c]) => (<option key={code} value={code}>{c.name}</option>))}</select></div></main></div>{toast && <div className="toast">{toast}</div>}</>); }
   if (sessionExpired) { return (<><style>{css}</style><div className="session-overlay"><div className="session-card"><div className="session-logo">Spend<span style={{ color: "#00C896" }}>Sight</span></div><div className="session-message">Your session has timed out for security.</div><button className="session-btn" onClick={() => { setSessionExpired(false); lastActivityRef.current = Date.now(); }}>Resume Session</button></div></div></>); }
   
-  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
+  return (<><style>{css}</style><div className="app">{showInstallPrompt && (<div className="install-banner"><p>📲 Install SpendSight on your device for quick access and offline use.</p><div><button className="install-btn" onClick={handleInstall}>Install</button><button className="dismiss-btn" onClick={dismissInstall}>Not now</button></div></div>)}<div className={`mobile-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} /><div className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="sidebar-logo"><div className="logo-text">Spend<span className="logo-dot">Sight</span></div></div><nav className="sidebar-nav">{navItems.map(n => (<button key={n.id} className={`nav-item ${page === n.id ? "active" : ""}`} onClick={() => { setPage(n.id); setSidebarOpen(false); }}><span className="nav-icon">{n.icon}</span>{n.label}</button>))}</nav><div className="sidebar-footer"><div className="user-chip"><div className="user-avatar">{user.name[0].toUpperCase()}</div><div className="user-name">{user.name}</div></div></div></div><div className="mobile-header"><button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}><span /><span /><span /></button><span style={{ fontFamily: "Syne", fontWeight: 800, color: "white", fontSize: 18 }}>Spend<span style={{ color: "#00C896" }}>Sight</span></span><div style={{ width: 30 }} /></div><main className="main">{page === "dashboard" && <Dashboard user={user} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} onUpdateBudget={handleUpdateBudgets} onAddIncome={handleAddIncome} onDeleteIncome={handleDeleteIncome} currency={currency} onCurrencyChange={setCurrency} showToast={showToast} />}{page === "upload" && <UploadPage onUpload={handleUpload} uploadedFiles={uploadedFiles} currency={currency} showToast={showToast} />}{page === "transactions" && <TransactionsPage transactions={transactions} setTransactions={setTransactions} currency={currency} showToast={showToast} />}{page === "insights" && <InsightsPage transactions={transactions} currency={currency} />}{page === "whatif" && <WhatIfPage transactions={transactions} incomes={incomes} currency={currency} customScenarios={customScenarios} onAddScenario={handleAddScenario} onDeleteScenario={handleDeleteScenario} />}{page === "goals" && <GoalsPage goals={goals} onAdd={(g) => setGoals(gs => [...gs, g])} onContribute={handleContributeToGoal} currency={currency} showToast={showToast} />}{page === "contact" && <ContactPage />}{page === "settings" && <SettingsPage user={user} onLogout={() => { setUser(null); setPage("dashboard"); }} onClearData={handleClearData} currency={currency} onCurrencyChange={setCurrency} theme={theme} onThemeChange={setTheme} textSize={textSize} onTextSizeChange={setTextSize} transactions={transactions} goals={goals} incomes={incomes} budgets={budgets} customScenarios={customScenarios} onRestoreData={handleRestoreData} showToast={showToast} />}</main></div>{toast && <div className="toast">{toast}</div>}</>);
 }
